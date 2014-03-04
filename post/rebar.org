@@ -1,0 +1,697 @@
+#+TITLE: Все, что вы хотели знать о Rebar, но ленились прочитать
+
+Давеча, 15 февраля, побывал в Днепропетровске на конференции [[http://douua.org/calendar/4292/][Erlang
+Dnipro 2014]], организованной Сергеем Костюшкиным. Конфа получилась
+хорошая.  Сергее планирует сделать ее ежегодной. Посмотрим, было бы
+неплохо :)
+
+Выступил с докладом про Rebar. Видео снимали, еще пока не готово.
+[[http://www.slideshare.net/YuriZhloba/rebar][Презентация тут]], ну и текст выступления ниже )
+
+* Все, что вы хотели знать о Rebar, но ленились прочитать
+
+Если верить [[http://en.wikipedia.org/wiki/Rebar][википедии]], то Rebar -- это арматура для железобетонных конструкций :)
+
+Но нас интересует не арматура, а известный инструмент для сборки Erlang-проектов.
+
+Занимается он не только сборкой Erlang-проектов, но и многими другими
+полезными вещами. А именно:
+- сборка драйверов из сорцов С/C++;
+- сборка прочих сопутствующих штук (ErlyDTL шаблоны, Protocol Buffers)
+- создание приложений, модулей, тестов из шаблонов
+- подготовка релизов
+- управление зависимостями
+- запуск тестов (EUnit и Common Test)
+- сборка escript-приложений
+- генерация документации
+
+Представляет собой одиночный исполняемый файл, который легко скачать,
+положить в *PATH* или в проект, и запустить.
+
+Так же Rebar, это [[https://github.com/rebar/rebar/][популярный проект на github.com]],
+имеющий 117 контрибуторов, 100 форков и 12600 строк кода.
+
+
+** Документация
+
+Rebar легко использовать. Достаточно знать 4 команды
+и уметь описывать зависимости в *rebar.config*.
+
+А что бы разобраться чуть глубже, нужно заглянуть в документацию.
+Она есть на [[https://github.com/rebar/rebar/wiki][github.com в виде wiki-страниц]].
+
+И есть встроенная в сам Rebar и доступная из консоли:
+#+BEGIN_SRC Shell-script
+rebar help
+rebar --commands
+rebar help compile
+rebar help get-deps
+rebar help clean
+#+END_SRC
+
+Эти две документации, конечно, пересекаются, но в общем не одинаковые.
+
+Ну и 3-й источник информации -- это исходный код, конечно. Например,
+подробнее об опциях для компиляции ErlyDTL шаблонов можно узнать
+только в комментариях [[https://github.com/rebar/rebar/blob/master/src/rebar_erlydtl_compiler.erl][соответствующего исходника]]. Ибо в
+wiki-документации такая компиляция упоминается без подробностей, а в
+*rebar help compile* настройки перечисляются, но не объясняются.
+
+Еще есть доклад Dizzy Smith, Erlang-разработчика из компании Basho на
+Erlang User Conference 2012 [[http://www.erlang-factory.com/conference/ErlangUserConference2012/speakers/DizzySmith][Applied Rebar]].  Но, чесно говоря, этот
+доклад ничего не добавляет к документации, и не избавляет от
+необходимости ее читать.
+
+
+** Основные команды
+
+Начнем с 4х самых важных команд.
+
+Допустим, мы только что клонировали из репозитория какой-то Erlang-проект и хотим его собрать.
+
+В первую очередь нам нужно вытянуть зависимости для этого проекта:
+#+BEGIN_SRC Shell-script
+rebar get-deps
+#+END_SRC
+
+После чего проект можно собирать вместе с зависимостями.
+#+BEGIN_SRC Shell-script
+rebar compile
+#+END_SRC
+
+Ну вот и все, хватило даже 2-х команд :)
+
+Кроме этого нужно уметь запускать юнит-тесты (у вас ведь есть юнит-тесты, правда? :)
+#+BEGIN_SRC Shell-script
+rebar eunit
+#+END_SRC
+
+И иногда нам захочется очистить проект, удалить все скомпилированные
+файлы, и пересобрать все целиком с нуля:
+#+BEGIN_SRC Shell-script
+rebar clean
+#+END_SRC
+
+К этим командам добавим одну важную опцию: *skip_deps=true*
+
+Вы вряд ли хотите пересобирать каждый раз все зависимости. Хотя Rebar
+умный, пересобирает только измененные файлы, но если зависимостей
+много, то Rebar все равно потратит лишние 1-2 секунды, чтобы все их
+обойти, и все файлы там проверить. Поэтому:
+#+BEGIN_SRC Shell-script
+rebar compile skip_deps=true
+#+END_SRC
+
+Вы вряд ли хотите каждый раз запускать все тесты, которые имеются в
+зависимостях. Зачем вам чужие тесты? А если они еще и падают? :) Да,
+вы можете починить чужой код, но не прямо сейчас. У вас ведь своя
+работа есть. Поэтому:
+#+BEGIN_SRC Shell-script
+rebar eunit skip_deps=true
+#+END_SRC
+
+Ну и чистить можно только свой проект, а зависимости оставить скомпилированными:
+#+BEGIN_SRC Shell-script
+rebar clean skip_deps=true
+#+END_SRC
+
+Ну вот, 4 команды, одна опция, и теперь вы все знатоки Rebar :)
+
+
+** Компиляция
+
+Теперь поговорим о главном -- о компиляции.
+
+Rebar предполагает, что ваш проект организован согласно
+[[http://www.erlang.org/doc/design_principles/des_princ.html][OTP Design Principles]] и, в частности, имеет типовую структуру:
+- ebin -- сюда складываются скомпилированные beam-файлы
+- include -- здесь находятся заголовочные hrl-файлы
+- src -- здесь исходники, erl-файлы
+- priv -- здесь всякие сопутствующие файлы, шаблоны, статика, скрипты и т.д.
+
+К этой структуре Rebar добавляет свои соглашения:
+- deps -- сюда выкачиваются зависимости
+- test -- здесь находятся юнит-тесты
+- c_src -- здесь находятся C/C++ сорцы
+
+Проект с такой структурой, если он не имеет зависимостей,
+собирается Rebar даже при отсутствии *rebar.config*.
+
+
+*** erlc
+
+Однако Rebar не сам компилирует сорцы, а доверяет это дело *erlc* --
+компилятору, входящему в стандартную поставку Erlang. И прежде, чем
+говорить, что делает Rebar, нужно рассказать, что делает erlc.
+Наверняка вы это знаете, ведь как-то ж вы собираете свои проекты :)
+Но все-таки уточним важные моменты.
+
+[[http://www.erlang.org/doc/man/erlc.html][erlc]] не просто компилятор, а набор разных компиляторов. Ориентируясь
+на расширение файла, он решает, что и чем нужно собирать, и поручает
+сборку соответствующему тулу.
+
+Если бы мы собирали наш типовой проект с помощью erlc,
+то это выглядело бы, например, так:
+#+BEGIN_SRC Shell-script
+erlc -I include -o ebin src/*.erl
+#+END_SRC
+
+Опция *-I* указывает папку с хедер-файлами, опция *-o* указывает папку,
+куда складывать результат компиляции, ну и *src/\*.erl* задает список
+файлов, которые нужно скомпилировать.
+
+Еще есть опции для определения макросов *-Dname=value*, для отключения
+предупреждений *-W0* (никогда так не делайте :), или, наоборот, для
+трактовки предупреждений как ошибок *-Werror* (а так можете делать :).
+Ну и несколько других, не очень нужных.
+
+Кроме компилятора erl-файлов, erlc еще включает, например, [[http://www.erlang.org/doc/man/yecc.html][Yecc]] --
+парсер-генератор, умеющий создавать erl-сорцы из описаний грамматик в
+форме Бэкуса — Наура.  И другие, не менее экзотические штуки.
+
+
+*** rebar
+
+Ну вот, сорцы Erlang были скомпилированы с помощью ercl.
+А что же к этому добавляет Rebar? Да многое.
+
+Важная вещь в OTP-приложении, это файл *ebin/myapp.app*
+описывающий метаинформацию о приложении: имя, номер версии, главный модуль,
+зависимости от системных приложений. И, помимо прочего, там перечисляются
+все модули, входящие в состав приложения. Без Rebar этот файл пришлось бы
+поддерживать вручную -- не забывать добавлять туда все новые модули.
+
+Вместо этого Rebar предлагает использовать файл *src/myapp.app.src*, где
+указано все тоже самое, кроме списка модулей. Из него Rebar автоматически
+генерирует *ebin/myapp.app*, но уже сам добавляет туда все модули, которые
+есть в src. Ну а если вы, все-таки, создали *ebin/myapp.app* сами,
+то Rebar проверит, чтобы там все модули были перечислены,
+и чтобы не было указано лишних.
+
+Далее, Rebar умеет компилировать C/C++ сорцы драйверов, если находит их в папке *c_src*.
+Делает он это опять не сам, а поручает компиляторам *cc* и *c++*. Но контролирует
+изменения в файлах сам.
+
+Еще Rebar умеет компилировать шаблоны [[https://github.com/erlydtl/erlydtl][ErlyDTL]].  Это html-шаблоны,
+такие же, как в *Django*, популярном веб фреймворке для Python.  Rebar
+компилирует каждый шаблон в отдельный Erlang-модуль, сразу в
+beam-файл.  Вернее, он опять не сам это делает, а поручает
+компилятору, входящему в состав библиотеки *erlydtl*.
+
+И это еще не все :)
+
+Есть такая популярная библиотека сериализации данных [[https://developers.google.com/protocol-buffers/docs/overview?hl=ru-RU&csw=1][Google Protocol
+Buffers]], она же *protobuf*. Фишка этой библиотеки в том, что данные
+описываются в текстовых *proto* файлах, из которых автоматически
+генерируется клиентский и серверный код, описывающий соответствующие
+объекты на нужном языке программирования. Сам гугл поддерживает
+генерацию кода для *Java*, *Python* и *C++*. Но есть сторонние
+библиотеки для других языков, в т.ч. и для Erlang --
+[[https://github.com/ngerakines/erlang_protobuffs][erlang_protobuffs]].
+
+Rebar умеет генерировать из *proto* файла Erlang-модуль (erl) и хедер файл (hrl).
+Как вы уже догадались, он делает это не сам, а поручает компилятору,
+входящему в состав библиотеки *erlang_protobuffs* :)
+
+Ну, теперь все.
+
+
+** Управление зависимостями
+
+Rebar умеет клонировать и собирать зависимые библиотеки из репозиториев git, mercurial и bazaar.
+
+Для этого зависимости нужно описать в *rebar.config*
+#+BEGIN_SRC erlang
+{deps, [Dependency1,
+        Dependency2,
+        Dependency3]}.
+#+END_SRC
+
+где *Dependency* это
+#+BEGIN_SRC erlang
+{App, VsnRegex, Source}
+#+END_SRC
+
+*App* -- имя OTP-приложения библиотеки,
+*VsnRegex* -- регулярное выражение, с которым должна совпадать версия библиотеки
+*Source* -- источник, откуда брать исходные коды.
+
+Источник описывается так:
+#+BEGIN_SRC erlang
+{git, Url, Rev}
+{hg,  Url, Rev}
+{bzr, Url, Rev}
+#+END_SRC
+
+*Url* -- путь к репозиторию
+*Rev* -- ветка, тэг или коммит
+
+#+BEGIN_SRC erlang
+{branch, "master"}
+{tag, "v1.0"}
+"62b7c9b12daacfcbcf274bc0925a7f8d10e3a1e0"
+"v1.0"
+"HEAD"
+""
+#+END_SRC
+
+Пример:
+#+BEGIN_SRC erlang
+{deps, [
+    {emysql, ".*", {git, "https://github.com/Eonblast/Emysql.git",
+                    "62b7c9b12daacfcbcf274bc0925a7f8d10e3a1e0"}},
+    {mcd, ".*", {git, "https://github.com/EchoTeam/mcd.git",
+                 "f72ebf5006e1b1234e16f86514e4291c57506024"}},
+    {cowboy, ".*", {git, "https://github.com/extend/cowboy", "0.8.6"}},
+    {mimetypes, ".*", {git, "git://github.com/spawngrid/mimetypes.git", {branch, "master"}}},
+    {lager, ".*", {git, "https://github.com/basho/lager.git", "2.0.1"}},
+    {ux, ".*", {git, "https://github.com/erlang-unicode/ux.git", "v3.4.1"}}
+    ]}.
+#+END_SRC
+
+Оптимально указывать зависимость от конкретного тэга или
+комита. Зависимость от ветки без указания комита таит
+опасность. Библиотека позже может измениться, причем несовместимо с
+вашим кодом.  Хорошо, если автор библиотеки управляет версиями и
+помечает их тэгами. Но часто тэгов нет.  Тогда лучше указать последний
+комит на тот момент, когда вы клонировали библиотеку.
+
+Подразумевается, что все эти зависимости тоже собираются Rebar. И
+они тоже могут иметь свой rebar.config и свои зависимости
+(транзитивные).  Например, *cowboy* зависит от *ranch*. Если это так,
+то Rebar клонирует и соберет транзивные зависимости тоже.
+
+Однако может быть так, что вам нужна какая-то библиотека, которая
+не собирается Rebar. Тогда зависимость указывается так:
+#+BEGIN_SRC erlang
+{somelib, ".*", {git, "https://somewhere.com/somelib.git", "v1.0"}, [raw]}
+#+END_SRC
+
+Тогда Rebar скачает ее сорцы, но не будет компилировать. Вам придется
+собрать ее отдельно.
+
+Кроме уже известной нам команды *get-deps* есть несколько других
+
+*check-deps* проверяет, все ли зависимости клонированы. Не проверяет
+ транзитивные зависимости.
+
+*list-deps* проверяет, все ли зависимости клонированы в
+ т.ч. транзитивные. Выводит информацию о каждой зависимости: имя
+ приложения, номер версии, источник.
+
+*update-deps* обновляет зависимости, клонирует свежие версии. Тут
+ Rebar проверяет конфликты версий библиотек. И выдает ошибку, если
+ одна и та же библиотека, но разных версий, является
+ зависимостью. Интересно, что Rebar этого не делает в get-deps и
+ compile :)
+
+*delete-deps* удаляет зависимости, оставляет пустую папку deps.
+
+
+** Шаблоны
+
+Интересная фишка Rebar -- создание приложений, модулей, ген-серверов, тестов
+и пр. из шаблонов с помощью команды *create*.
+#+BEGIN_SRC Shell-script
+rebar create template= [var=foo,...]
+#+END_SRC
+
+Например, вот так можно создать новое приложение:
+#+BEGIN_SRC Shell-script
+rebar create template=simpleapp appid=myapp
+#+END_SRC
+
+А вот так можно создать модуль gen_server:
+#+BEGIN_SRC Shell-script
+rebar create template=simplesrv srvid=my_server
+#+END_SRC
+
+Для самых важных шаблонов есть сокращенный вариант:
+#+BEGIN_SRC Shell-script
+rebar create-app appid=myapp
+rebar create-node nodeid=mynode
+#+END_SRC
+
+Список всех шаблонов можно посмотреть командой *list-templates*
+#+BEGIN_SRC Shell-script
+rebar list-templates
+#+END_SRC
+
+У этой команды есть странность. Она зачем-то рекурсивно обходит все
+каталоги внутри текущего каталога, и для всех найденных
+erlang-проектов показывает один и тот же список. Зачем нужно лазить по
+каталогам, а не понял.  Если запустить в своем домашнем каталоге, то
+она будет работать долго. И у меня падает с ошибкой на каком-то
+проекте :)
+
+Если запустить в пустом каталоге, то вывод будет таким:
+
+#+BEGIN_SRC Shell-script
+yura ~/tmp $ rebar list-templates
+==> tmp (list-templates)
+  * simplesrv: priv/templates/simplesrv.template (escript) (variables: "srvid")
+  * simplenode: priv/templates/simplenode.template (escript) (variables: "nodeid")
+  * simplemod: priv/templates/simplemod.template (escript) (variables: "modid")
+  * simplefsm: priv/templates/simplefsm.template (escript) (variables: "fsmid")
+  * simpleapp: priv/templates/simpleapp.template (escript) (variables: "appid")
+  * ctsuite: priv/templates/ctsuite.template (escript) (variables: "testmod")
+  * basicnif: priv/templates/basicnif.template (escript) (variables: "module")
+#+BEGIN_SRC erlang
+
+Rebar показывает имя шаблона, где он хранится в проекте rebar, и
+какие переменные можно подставить.
+
+К сожалению, документации по шаблонам нет в вики. И *rebar help
+create* тоже не показывает ничего интересного. Так что нужно просто
+пробовать и смотреть, что получается.
+
+Создадим приложение:
+#+BEGIN_SRC Shell-script
+yura ~/p $ mkdir coolstuff; cd coolstuff
+yura ~/p/coolstuff $ rebar create template=simpleapp appid=coolstuff
+==> coolstuff (create)
+Writing src/coolstuff.app.src
+Writing src/coolstuff_app.erl
+Writing src/coolstuff_sup.erl
+yura ~/p/coolstuff $ tree
+.
+└── src
+    ├── coolstuff_app.erl
+    ├── coolstuff.app.src
+    └── coolstuff_sup.erl
+
+1 directory, 3 files
+#+END_SRC
+
+Как видно, Rebar сгенерировал модуль приложения, модуль корневого
+супервизора и .app.src файл.  Дал соответствующие имена файлам, и
+подставил соответствующие *-module(name)* конструкции в них.
+
+Добавим в него модуль ген-сервер:
+#+BEGIN_SRC Shell-script
+yura ~/p/coolstuff $ rebar create template=simplesrv srvid=my_server
+==> coolstuff (create)
+Writing src/my_server.erl
+yura ~/p/coolstuff $ cat src/my_server.erl
+-module(my_server).
+-behaviour(gen_server).
+-define(SERVER, ?MODULE).
+...
+#+END_SRC
+
+Добавим еще один модуль:
+#+BEGIN_SRC Shell-script
+yura ~/p/coolstuff $ rebar create template=simplemod modid=my_cool_module
+==> coolstuff (create)
+Writing src/my_cool_module.erl
+Writing test/my_cool_module_tests.erl
+yura ~/p/coolstuff $ cat src/my_cool_module.erl
+-module(my_cool_module).
+
+-export([my_func/0]).
+
+my_func() ->
+    ok.
+yura ~/p/coolstuff $ cat test/my_cool_module_tests.erl
+-module(my_cool_module_tests).
+-include_lib("eunit/include/eunit.hrl").
+#+END_SRC
+
+Rebar создал не только модуль, но и тесты для него.
+
+Все шаблоны можно найти на
+[[https://github.com/rebar/rebar/tree/master/priv/templates][github в проекте rebar]].
+в папке *priv/templates*.
+#+BEGIN_SRC Shell-script
+yura ~/p/rebar/priv/templates $ ls -1 *.template
+basicnif.template
+ctsuite.template
+simpleapp.template
+simplefsm.template
+simplemod.template
+simplenode.template
+simplesrv.template
+#+END_SRC
+
+Итого их 7 штук.
+
+Как они устроены? Довольно просто:
+#+BEGIN_SRC Shell-script
+yura ~/p/rebar/priv/templates $ ls -1 simpleapp*
+simpleapp_app.erl
+simpleapp.app.src
+simpleapp_sup.erl
+simpleapp.template
+yura ~/p/rebar/priv/templates $ cat simpleapp.template
+{variables, [{appid, "myapp"}]}.
+{template, "simpleapp.app.src", "src/{{appid}}.app.src"}.
+{template, "simpleapp_app.erl", "src/{{appid}}_app.erl"}.
+{template, "simpleapp_sup.erl", "src/{{appid}}_sup.erl"}.
+#+END_SRC
+
+Есть *template* файл, который указывает, имеющиеся переменные и их
+дефолтные значения, и какие еще файлы входят в шаблон. И есть
+файлы-заготовки. Посмотрев все это, мы знаем, какие файлы будут
+созданы, какой код в них будет сгенерирован, и какие переменные нужно
+указать.
+
+Эти три шаблона мы уже попробовали:
+- *simpleapp* -- создает приложение;
+- *simplesrv* -- создает gen_server модуль;
+- *simplemod* -- создает пустой модуль;
+
+Еще есть:
+- *simplefsm* -- создает gen_fsm модуль;
+- *basicnif* -- заготовка для порта, создает erlang-модуль и с-файл;
+- *ctsuite* -- создает common test suite модуль в папке test;
+- *simplenode* -- самый сложный шаблон, создает файлы для релиза.
+
+В свежей версии Rebar появился еще *simplelib*, но в установленном у
+меня Rebar такого шаблона нет.
+
+Все эти шаблоны находятся внутри файла Rebar в архивированом
+виде. Если хочется что-то в них поменять, то есть два пути. Либо
+клонировать проект Rebar, изменить в нем шаблоны, и собрать свою
+версию Rebar. Либо положить шаблоны в папку *~/.rebar/templates*.
+#+BEGIN_SRC Shell-script
+yura ~ $ mkdir -p .rebar/templates
+yura ~ $ cp p/rebar/priv/templates/simplemod* .rebar/templates
+#+END_SRC
+И изменить их там.
+
+В первом варианте измененный Rebar можно использовать для всех
+разработчиков в команде. Во втором варианте измененные шаблоны будут
+только у вас.
+
+В *~/.rebar/templates* можно добавлять свои собственные шаблоны.
+Их довольно легко сделать, взяв за основу стандартные.
+
+
+** Тестирование
+
+Rebar умеет запускать тесты. С этим довольно просто:
+#+BEGIN_SRC Shell-script
+rebar eunit
+#+END_SRC
+
+При этом Rebar отдельно собирает проект с включенным макросом
+*-DDEBUG=true* в папку *.eunit*, так что это не влияет на собранные в
+обычном режиме beam-файлы.
+
+Как уже сказано выше, обычно мы хотим запускать тесты только нашего проекта,
+а не тесты зависимых библиотек:
+#+BEGIN_SRC Shell-script
+rebar eunit skip_deps=true
+#+END_SRC
+
+Когда мы работаем над конкретным модулем, лучше запускать тесты только
+для этого модуля. И сборка быстрее, и инфа выводится только та, что нужна:
+#+BEGIN_SRC Shell-script
+rebar eunit skip_deps=true suites=module1_test
+#+END_SRC
+
+Можно запустить тесты для двух-трех модулей:
+#+BEGIN_SRC Shell-script
+rebar eunit skip_deps=true suites="module1_test,module2_test"
+#+END_SRC
+
+Можно запустить конкретные тесты в модуле:
+#+BEGIN_SRC Shell-script
+rebar eunit skip_deps=true suites=module1_test tests=some
+rebar eunit skip_deps=true suites=module1_test tests="some,another"
+#+END_SRC
+
+Опция tests пока нестабильная, у меня, бывает, выдает ошибки.
+
+Отчеты о тестах тоже сохраняются в папке *.eunit* в файлах *TEST-module1_test.xml*.
+И если в *rebar.config* включена опция *cover_enabled*, то сохраняются также
+отчеты о покрытии кода тестами в файлах *module1_test.COVER.html*.
+
+Rebar также умеет запускать common test:
+#+BEGIN_SRC Shell-script
+rebar ct \[suites=\] \[case=\]
+#+END_SRC
+
+Но я их не использую, так что не буду углубляться.
+
+
+** rebar.config
+
+Еще одна важная тема -- конфигурирование Rebar.
+
+Если ваш проект следует структуре OTP-приложения, не имеет зависимостей и
+не требует нестандартных опций при сборке, то *rebar.config* не нужен. Впрочем,
+его все равно лучше иметь, это сразу скажет другим разработчиком, что проект
+собирается Rebar.
+
+Настроек довольно много. Есть настройки общие для всех команд, есть специфические
+для конкретной команды. Их можно увидеть, набрав *rebar help command*.
+
+Пример конфига есть в проекте ребар: [[https://github.com/rebar/rebar/blob/master/rebar.config.sample][rebar.config.sample]]. Там указано
+много разных опций с комментариями, но не все :)
+
+Посмотрим некоторые из них.
+
+*erl_opts* задают настройки компиляции:
+#+BEGIN_SRC erlang
+{erl_opts, [debug_info,
+            warn_export_all,
+            warn_missing_spec,
+            warning_as_errors,
+            {parse_transform, lager_transform}
+           ]}.
+#+END_SRC
+
+Поддерживаются все опции, которые есть у функции
+[[http://www.erlang.org/doc/man/compile.html][compile:file/2]].
+
+Примеры:
+- *debug_info* -- включить отладочную информацию, нужную отладчику и *xref* тулу;
+- *warnings_as_errors* -- считать предупреждения ошибками, и не компилировать код;
+- *{d, Macro}* и *{d, Macro, Value}* -- определить макрос;
+- *warn_export_all* -- предупреждать об использовании *export_all*;
+- *bin_opt_info* -- предупреждать, если матчинг на binary может быть оптимизирован;
+
+Можно переопределить стандартные папки:
+- *src_dir* -- папка с исходниками;
+- *deps_dir* -- папка с зависимостями;
+- *target_dir* -- папка для скомпилированных beam-файлов;
+- *{erl_opts, [{i, "my_include"}]}* -- папка с заголовочными файлами
+
+Если в вашем проекте есть вложенные OTP-приложения, то нужны опции
+*lib_dirs* и *sub_dirs*.
+#+BEGIN_SRC erlang
+{lib_dirs, ["deps", "apps"]}.
+{sub_dirs, ["apps/app1", "apps/app2"]}.
+#+END_SRC
+
+*lib_dirs* указывает папки, где нужно искать хедер-файлы, подключаемые через *include_lib*.
+А *sub_dirs* указывает папки, где находятся вложенные приложения.
+
+Сохранять отчеты о покрытии тестами:
+#+BEGIN_SRC erlang
+{cover_enabled, true}.
+#+END_SRC
+
+Удалять файлы при очиске проекта (rebar clean):
+#+BEGIN_SRC erlang
+{clean_files, ["erl_crash.dump"]}.
+#+END_SRC
+
+Настройки для утилиты [[http://www.erlang.org/doc/man/xref.html][xref]]:
+#+BEGIN_SRC erlang
+{xref_checks, [
+    undefined_function_calls,
+    undefined_functions,
+    locals_not_used,
+    exports_not_used,
+    deprecated_function_calls,
+    deprecated_functions
+]}.
+#+END_SRC
+
+Что касается *rebar.config*, надо сказать, что здесь документация слабая. Я пересмотрел
+много таких конфигов из разных проектов, и часто видел опции, нигде не документированные.
+Например:
+#+BEGIN_SRC erlang
+{erl_opts, [
+            warn_missing_spec,
+            warn_untyped_recod,
+            fail_on_warning
+           ]}.
+#+END_SRC
+
+Как они действуют, и действуют ли вообще как-нибудь, неизвестно :)
+
+На самом деле все хорошо работает по-умолчанию, и настройки нужны
+по-минимуму.  Самое главное, это *{deps, []}*, конечно. Все
+предупреждения включены по умолчанию, специально включать их не нужно.
+Полезная вещь *warning_as_errors*, хотя эта опция часто докучает. Тем,
+кто использует *lager* не обойтись без
+*{parse_transform, lager_transform}*.
+Вот и все, этого достаточно для большинства проектов.
+
+
+** Прочие возможности
+
+*rebar escriptize* создание escript-приложения. Об этом чуть
+подробнее, потому что ребар сам является таким приложением.
+
+escript -- это консольное приложение, которое должно работать как все
+консольные утилиты unix-подобных ОС: получать аргументы на входе,
+отрабатывать, выводить инфу на стандартный вывод, возвращать код
+возврата и т.д. Не типичное применение Erlang, но иногда полезное.
+
+escript файл, как и все скриптовые файлы, начинается с заголовка
+#+BEGIN_SRC Shell-script
+\#!/usr/bin/env escript
+#+END_SRC
+
+Потом идут настройки для erlang vm. У самого rebar такие:
+#+BEGIN_SRC erlang
+%%! -pa rebar/rebar/ebin
+#+END_SRC
+
+а потом возможны варианты:
+- исходный код Erlang;
+- бинарные данные скомпилированного beam-файла;
+- бинарные данные zip-архива, содержащего beam-файлы.
+
+Rebar представляет собой 3-й вариант. Его даже можно распаковать, только
+сперва нужно переименовать файл, иначе он будет конфликтовать с именем
+папки внутри архива.
+#+BEGIN_SRC Shell-script
+yura ~/tmp/look_inside_rebar $ mv rebar rebar_file
+yura ~/tmp/look_inside_rebar $ unzip rebar_file
+Archive:  rebar_file
+warning [rebar_file]:  51 extra bytes at beginning or within zipfile
+  (attempting to process anyway)
+   creating: rebar/
+   creating: rebar/ebin/
+  inflating: rebar/ebin/getopt.beam
+  inflating: rebar/ebin/mustache.beam
+  inflating: rebar/ebin/rebar.app
+  inflating: rebar/ebin/rebar.beam
+  ...
+   creating: priv/
+   creating: priv/templates/
+  inflating: priv/templates/basicnif.c
+  inflating: priv/templates/basicnif.erl
+  inflating: priv/templates/basicnif.template
+  ...
+#+END_SRC
+
+Как видим, внутри beam-файлы и шаблоны. Ну вот, Rebar умеет создавать такие приложения,
+в т.ч. самого себя :)
+
+*rebar xref* проверка кода проекта утилитой [[http://www.erlang.org/doc/man/xref.html][xref]].  Анализирует
+зависимости между приложениями, модулями и функциями. Сообщает о
+неиспользуемых функциях и модулях, о вызовах несуществующих функций и
+модулей и т.д.
+
+*rebar doc* генерация документации утилитой [[http://www.erlang.org/doc/man/edoc.html][EDoc]].  Ну тут рассказывать
+особо нечего, аналогичные тулы есть во многих других языка.
+
+Ну и еще сборка релизов. Эту тему я не трогал, потому что это
+отдельная большая тема.  И еще потому, что сам я релизы не
+использую :)
