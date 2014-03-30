@@ -1,0 +1,933 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Distributed Erlang</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+<h1>Distributed Erlang</h1>
+<p><i>30 марта 2014</i></p>
+
+<p>
+Вчера выступил для <a href="http://www.meetup.com/fsharpminsk/events/167278002/">Minsk F# User Group</a>, с рассказом про
+распределенность в Erlang. Народу собралось не много, но зато те, кто
+собрались, почти все выдержали до конца выступления. Значит было
+интересно :) А получилось довольно длинно &#x2013; где-то 2 часа рассказывал
+теорию, и 1 час live coding.
+</p>
+
+<p>
+Помещение любезно предоставлено <a href="https://www.facebook.com/mdubakov/posts/10152292589669826?stream_ref=10">лучшей в Беларуси</a> IT-компанией
+<a href="http://taucraft.com/">Taucraft</a>. Мне было интересно посмотреть их офис, и я просил
+<a href="http://www.meetup.com/fsharpminsk/members/73009372/">организаторов</a>, чтобы встреча была именно там. Посмотрел. Офис очень
+клевый. Я бы там с удовольствием работал. Жаль, по стеку технологий я
+совсем не подхожу :)
+</p>
+
+<p>
+Презентация <a href="http://www.slideshare.net/YuriZhloba/distributed-erlang-32886201">тут</a>. Текст выступления ниже. Код live coding <a href="https://github.com/yzh44yzh/erlang-school/tree/master/distributed_chat">тут</a>.
+</p>
+
+<ul>
+<li><a href="#sec-1">1. Распределенность в Erlang</a>
+<ul>
+<li><a href="#sec-1-1">1.1. Что такое распределенная система?</a></li>
+<li><a href="#sec-1-2">1.2. Зачем их делают?</a></li>
+<li><a href="#sec-1-3">1.3. Какова надежность Erlang?</a></li>
+<li><a href="#sec-1-4">1.4. Терминология</a></li>
+<li><a href="#sec-1-5">1.5. Что такого особенного в Erlang?</a></li>
+<li><a href="#sec-1-6">1.6. Ссылки</a></li>
+</ul>
+</li>
+<li><a href="#sec-2">2. Erlang кластер</a>
+<ul>
+<li><a href="#sec-2-1">2.1. Имена узлов</a></li>
+<li><a href="#sec-2-2">2.2. Соединение</a></li>
+<li><a href="#sec-2-3">2.3. Куки</a></li>
+<li><a href="#sec-2-4">2.4. epmd</a></li>
+</ul>
+</li>
+<li><a href="#sec-3">3. Модули и функции</a></li>
+<li><a href="#sec-4">4. Распределенное OTP приложение</a></li>
+<li><a href="#sec-5">5. Net Split</a></li>
+</ul>
+
+<div id="outline-container-sec-1" class="outline-2">
+<h2 id="sec-1"><span class="section-number-2">1</span> Распределенность в Erlang</h2>
+<div class="outline-text-2" id="text-1">
+
+<div id="outline-container-sec-1-1" class="outline-3">
+<h3 id="sec-1-1"><span class="section-number-3">1.1</span> Что такое распределенная система?</h3>
+<div class="outline-text-3" id="text-1-1">
+<p>
+<a href="http://en.wikipedia.org/wiki/Leslie_Lamport">Лесли Лэмпорт</a> (ученый, исследователь теории распределенных систем):
+</p>
+
+<p>
+A distributed system is one in which the failure of a computer you
+didn’t even know existed can render your own computer unusable.
+</p>
+
+<p>
+Ну это, конечно, шутка. А если серьезно, то распределенную систему можно определить так:
+система, состоящая из 2-х и более компьютеров, взаимодействующих между собой.
+</p>
+
+<p>
+Систем таких много, самых разных. И примеры долго искать не нужно:
+</p>
+
+<p>
+Хранилища данных: Google BigTable, Amazon SimpleDB, Hadoop, Cassandra,
+множество их, в т.ч. и написаные на Erlang: Riak, CouchDB.
+</p>
+
+<p>
+Сервисы: Google Search, поиск Яндекса, WhatsApp, множество их, в
+т.ч. и написаные частично на Erlang: Heroku, Github.
+</p>
+
+<p>
+Социальные сети: Facebook, Twitter, Вконтакте и др.
+</p>
+
+<p>
+Многопользовательские игры: Word of Warcraft, World of Tanks, Call of
+Duty Black Ops и др.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-2" class="outline-3">
+<h3 id="sec-1-2"><span class="section-number-3">1.2</span> Зачем их делают?</h3>
+<div class="outline-text-3" id="text-1-2">
+<p>
+Не то, чтобы все прям горели желанием, но приходится это делать тогда,
+когда задача не решается на одной машине:
+</p>
+
+<ul class="org-ul">
+<li>Хранить данных больше, чем может поместиться на одной машине;
+</li>
+<li>Обрабатывать данных больше, чем можно обработать на одной машине;
+</li>
+<li>Повысить надежность системы;
+</li>
+<li>Построить масштабируемую систему, способную адаптироваться к росту нагрузки;
+</li>
+<li>Сервисы, распределенные по своей сути (например, CDN &#x2013; content delivery network);
+</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-sec-1-3" class="outline-3">
+<h3 id="sec-1-3"><span class="section-number-3">1.3</span> Какова надежность Erlang?</h3>
+<div class="outline-text-3" id="text-1-3">
+<p>
+Erlang изначально ставил своей целью повысить надежность
+системы. Распределенность &#x2013; один из его уровней отказоустойчивости. И
+по части надежности и отказоустойчивости инженерам Ericsson удалось
+добиться весьма впечатляющих результатов.
+</p>
+
+<p>
+Отказоустойчивость систем принято оценивать, как соотношение времени,
+когда система была доступна пользователям, ко времени, когда была
+недоступна. Промежуток времени берется &#x2013; год, а соотношение оценивают в %.
+</p>
+
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="left" />
+
+<col  class="left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="left">Availability %</th>
+<th scope="col" class="left">Downtime per year</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="left">90% (one nine)</td>
+<td class="left">&lt; month</td>
+</tr>
+
+<tr>
+<td class="left">99%</td>
+<td class="left">&lt; 4 days</td>
+</tr>
+
+<tr>
+<td class="left">99,9%</td>
+<td class="left">&lt; 9 hours</td>
+</tr>
+
+<tr>
+<td class="left">99,99%</td>
+<td class="left">&lt; 1 hour</td>
+</tr>
+
+<tr>
+<td class="left">99,999%</td>
+<td class="left">~ 5 min</td>
+</tr>
+
+<tr>
+<td class="left">99,9999%</td>
+<td class="left">~ 31 sec</td>
+</tr>
+
+<tr>
+<td class="left">99,99999%</td>
+<td class="left">~ 3 sec</td>
+</tr>
+
+<tr>
+<td class="left">99,999999%</td>
+<td class="left">~ 300 msec</td>
+</tr>
+
+<tr>
+<td class="left">99,9999999%</td>
+<td class="left">~ 30 msec</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+С помощью Erlang была построена система с надежностью Nine Nines (девять девяток)
+</p>
+
+<p>
+Вот <a href="http://pragprog.com/articles/erlang">тут</a> один из создателей языка Джо Армстронг хвастается:
+</p>
+
+<p>
+The AXD301 has achieved a NINE nines reliability (yes, you read that
+right, 99.9999999%). Let’s put this in context: 5 nines is reckoned to
+be good (5.2 minutes of downtime/year). 7 nines almost unachievable
+&#x2026; but we did 9.
+</p>
+
+<p>
+А компания <a href="http://ninenines.eu/">99s</a>, давшая нам такие прекрасные тулы, как Cowboy, Ranch и Bullet,
+названа именно в честь такой отказоустойчивости Erlang.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-4" class="outline-3">
+<h3 id="sec-1-4"><span class="section-number-3">1.4</span> Терминология</h3>
+<div class="outline-text-3" id="text-1-4">
+<p>
+Введем немного терминологии.
+</p>
+
+<p>
+Эрланг приложение (Application) &#x2013; система, сервис или библиотека с
+определенной функцией.  Например: веб-сервер Cowboy, сервис
+логирования Lager, драйвер к базе данных и т.д.
+</p>
+
+<p>
+Узел (Node) &#x2013; экземпляр виртуальной машины Erlang. Обычно выполняет
+несколько Эрланг приложений.  На одной машине может быть запущено
+несколько узлов.
+</p>
+
+<p>
+Кластер &#x2013; несколько узлов, взаимодействующих между собой.
+Узлов в кластере может быть от 2х до сотен и тысяч :)
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-5" class="outline-3">
+<h3 id="sec-1-5"><span class="section-number-3">1.5</span> Что такого особенного в Erlang?</h3>
+<div class="outline-text-3" id="text-1-5">
+<p>
+Эффективную распределенную систему можно построить на самых разных
+технологиях и ЯП.  А в чем особенность именно Erlang? Он предлагает
+единый подход и к локальному и к распределенному программированию.
+</p>
+
+<p>
+Архитектура Erlang-приложения строится из независимых процессов,
+общающихся между собой отправкой сообщений.
+</p>
+
+<p>
+Как элемент архитектуры, процесс:
+</p>
+<ul class="org-ul">
+<li>имеет публичный АПИ (реагирует на определенные сообщения);
+</li>
+<li>хранит внутри себя состояние (некие данные);
+</li>
+<li>общается с другими процессами, пользуясь их публичным АПИ;
+</li>
+<li>имеет закрытую бизнес-логику;
+</li>
+</ul>
+
+<p>
+На что это похоже? На объект в ООП.
+</p>
+
+<p>
+Идем уровнем выше. Из процессов строятся приложения.
+</p>
+
+<p>
+Приложение:
+</p>
+<ul class="org-ul">
+<li>имеет публичный АПИ;
+</li>
+<li>хранит внутри себя данные;
+</li>
+<li>общается с другими приложениями, пользуясь их публичным АПИ;
+</li>
+<li>имеет закрытую бизнес-логику;
+</li>
+</ul>
+
+<p>
+Идем уровнем выше. Для выполнения приложений запускается узел.
+</p>
+
+<p>
+Узел:
+</p>
+<ul class="org-ul">
+<li>имеет публичный АПИ;
+</li>
+<li>хранит внутри себя данные;
+</li>
+<li>общается с клиентами и другими узлами;
+</li>
+<li>имеет закрытую бизнес-логику;
+</li>
+</ul>
+
+<p>
+Идем уровне выше. Из узлов строится кластер.
+</p>
+
+<p>
+Кластер:
+</p>
+<ul class="org-ul">
+<li>имеет публичный АПИ;
+</li>
+<li>хранит внутри себя данные;
+</li>
+<li>общается с клиентами;
+</li>
+<li>имеет закрытую бизнес-логику;
+</li>
+</ul>
+
+<p>
+На всех уровнях у нас один и тот же архитектурный паттерн. Но это еще
+не особенность Erlang, так можно строить систему и на других языках.
+</p>
+
+<p>
+Вся фишка Erlang в сетевой прозрачности. Процессы общаются отправкой
+сообщений друг другу, при этом не важно, находятся ли они на одном
+узле, или на разных. За реализацию отвечает виртуальная машина. Она
+сама открывает сокеты, устанавливает нужные TCP соединения между
+узлами, мониторит их состояние &#x2013; программисту об этих низкоуровневых
+вещах думать не нужно.
+</p>
+
+<p>
+Пробуем:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Shell-script">erl -name node1@127.0.0.1
+
+erl -name node2@127.0.0.1
+
+(node1@127.0.0.1)1&gt; net_adm:ping('node2@127.0.0.1').
+pong
+(node1@127.0.0.1)2&gt; register(my_shell, self()).
+true
+
+(node2@127.0.0.1)1&gt; {my_shell, 'node1@127.0.0.1'} ! "hello there".
+"hello there"
+
+(node1@127.0.0.1)3&gt; flush().
+Shell got "hello there"
+ok
+(node1@127.0.0.1)4&gt; node().
+'node1@127.0.0.1'
+(node1@127.0.0.1)5&gt; nodes().
+['node2@127.0.0.1']
+</pre>
+</div>
+
+<p>
+Это база всех взаимодействий. Если я знаю Pid процесса, или знаю, под
+каким именем он зарегистрирован, то я могу с ним общаться. Pid
+уникален в пределах кластера. Имя уникально в пределах узла.
+</p>
+
+<p>
+На самом деле вот такой код, с отправкой сообщений, пишут редко. На
+базе сообщений построены более высокие и удобные уровни: gen_server,
+rpc:call, распределенное OTP приложение и т.д. И разработчики обычно
+пользуются ими.
+</p>
+
+<p>
+Но сетевая прозрачность касается не только отправки сообщений, но и
+мониторинга процессов. Мониторинг, это когда один процесс (supervisor)
+наблюдает за состоянием другого процесса (worker), и получает сообщение
+если с worker случается какая-то проблема. Supervisor может
+предпринять в этом случае какие-то действия. Например, перезапустить
+worker.
+</p>
+
+<p>
+Эти механизмы тоже действуют в условиях сетевой прозрачности. Мониторить
+можно не только процессы в своем узле, но и процессы в другом узле.
+И можно мониторить доступность другого узла, и предпринять какие-то
+действия, если связь с другим узлом потеряна. Например, запустить
+резервную систему.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-6" class="outline-3">
+<h3 id="sec-1-6"><span class="section-number-3">1.6</span> Ссылки</h3>
+<div class="outline-text-3" id="text-1-6">
+<p>
+Весьма рекомендую книгу Фреда Хеберта
+<a href="http://learnyousomeerlang.com/content">Learn you some Erlang for greate good!</a>
+</p>
+
+<p>
+Она изначально была опубликована на сайте
+<a href="http://www.amazon.com/Learn-Some-Erlang-Great-Good/dp/1593274351/">недавно вышла и в бумажном виде, и в электронном</a>
+</p>
+
+<p>
+2 главы там посвящены распределенным приложениям:
+<a href="http://learnyousomeerlang.com/distribunomicon">Distribunomicon</a>
+<a href="http://learnyousomeerlang.com/distributed-otp-applications">Distributed OTP Applications</a>
+</p>
+
+<p>
+Соответствующие главы по теме есть и в классических книгах:
+<a href="http://www.amazon.com/Programming-Erlang-Concurrent-Pragmatic-Programmers/dp/193778553X/">Programming Erlang: Software for a Concurrent World. Joe Armstrong</a>
+<a href="http://www.amazon.com/Erlang-Programming-Francesco-Cesarini/dp/0596518188/">Erlang Programming. Francesco Cesarini, Simon Thompson</a>
+</p>
+
+<p>
+И в менее известной, но тоже очень хорошей
+<a href="http://www.amazon.com/Erlang-OTP-Action-Martin-Logan/dp/1933988789/">Erlang and OTP in Action. Martin Logan, Eric Merritt</a>
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-2" class="outline-2">
+<h2 id="sec-2"><span class="section-number-2">2</span> Erlang кластер</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+Erlang-узлы, собранные в кластер, формируют доверенную среду (trusted
+environment), без ограничения прав. Любой процесс может посылать любые
+сообщения кому угодно.  Это удобно, не безопасно. Подразумевается, что
+все узлы находятся в одной локальной сети, и сеть защищена от внешнего
+мира фаерволами и т.д.
+</p>
+
+<p>
+Если мы хотим наладить взаимодействие между узлами в разных сетях, то лучше
+делать независимые веб-сервисы, предоставляющие защищенное АПИ внешнему миру
+(например, REST HTTP API), как вы бы это делали на других языках.
+То есть, отказаться от эрланговской сетевой прозрачности.
+</p>
+
+<p>
+Есть еще вариант &#x2013; кастомизировать те средства, на которых построено общение
+между Erlang-узлами, пустив траффик по ssl и добавив какие-то еще меры защиты.
+Но я бы лучше сразу предполагал, что система будет разнородна, с участием
+не только Erlang, но и других технологий. И строил бы REST API.
+</p>
+</div>
+
+
+<div id="outline-container-sec-2-1" class="outline-3">
+<h3 id="sec-2-1"><span class="section-number-3">2.1</span> Имена узлов</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+При запуске узла ему дается имя
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Shell-script">erl -name node@host
+</pre>
+</div>
+
+<p>
+Имена бывают короткие и длинные, но написано про это во всех
+источниках как-то мутно, и я так и не понял, зачем нужны короткие
+имена. Использую длинные, они всегда работают :)
+</p>
+
+<p>
+В длинных именах имя хоста должно определяться DNS или это может быть IP адрес.
+Я предпочитаю IP адрес, чтобы не возиться с настройкой и поддержкой DNS :)
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-2-2" class="outline-3">
+<h3 id="sec-2-2"><span class="section-number-3">2.2</span> Соединение</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+Соединение устанавливается автоматически если один узел обращается к другому:
+отправляет сообщение зарегистрированному процессу, net_adm:ping и др.
+</p>
+
+<p>
+По умолчанию каждый узел в кластере связывается со всеми остальными.
+</p>
+
+<ul class="org-ul">
+<li>4 узла &#x2013; 6 соединений;
+</li>
+<li>10 узлов &#x2013; 45 соединений;
+</li>
+<li>и дальше рост в арифметической прогрессии :)
+</li>
+</ul>
+
+<p>
+Соединения не бесплатны, конечно. По ним ходят служебные сообщения Heart Beat,
+поддерживающие связь. В большом кластере такой трафик может быть существенным.
+</p>
+
+<p>
+Но есть альтернатива &#x2013; скрытые узлы.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Shell-script">erl -name foo@host -hidden
+</pre>
+</div>
+
+<p>
+Такой узел соединяется только с теми узлами, с которыми его явно соединили.
+Используя эти узлы можно строить подходящую топологию кластера.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-2-3" class="outline-3">
+<h3 id="sec-2-3"><span class="section-number-3">2.3</span> Куки</h3>
+<div class="outline-text-3" id="text-2-3">
+<p>
+Некоторый уровень безопасности в кластере все-таки есть. Все Erlang узлы на старте
+получают куку &#x2013; специальную строку символов, типа как пароль, только без логина
+(или, наоборот, логин без пароля).
+</p>
+
+<p>
+Когда узел пытается соединится с другим, он посылает свою куку (в зашифрованном виде).
+Другой узел сравнивает со своей кукой, и отклоняет соединение, если куки не совпали.
+</p>
+
+<p>
+Задать куку можно 3-мя способами:
+</p>
+
+<p>
+положить в файл
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Shell-script">~/.erlang.cookie
+</pre>
+</div>
+<p>
+(и поставить на него права 400, иначе узел не запустится)
+</p>
+
+<p>
+задать в аргументах при запуске узла
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Shell-script">erl -setcookie abc
+</pre>
+</div>
+
+<p>
+выполнить
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">erlang:set_cookie(Node, Cookie)
+</pre>
+</div>
+<p>
+в уже запущеном узле.
+</p>
+
+<p>
+Но если я знаю куку от чужого кластера, я могу запустить свой узел,
+подключить его к чужому кластеру, и выполнить:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:multicall(nodes(), os, cmd, ["rm -rf /"]).
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-sec-2-4" class="outline-3">
+<h3 id="sec-2-4"><span class="section-number-3">2.4</span> epmd</h3>
+<div class="outline-text-3" id="text-2-4">
+<p>
+<a href="http://www.erlang.org/doc/man/epmd.html">Erlang Port Mapper Daemon</a>
+</p>
+
+<p>
+Специальный сервис, который стартует вместе с первым Erlang узлом.
+У него можно узнать, какие узлы запущены на данной машине, и какие
+порты нужно использовать, чтобы соединиться с ними.
+</p>
+
+<p>
+Его можно запускать вручную с разными настройками:
+</p>
+<ul class="org-ul">
+<li>задать не стандартный порт (стандартный для него 4369);
+</li>
+<li>время heart beat сообщений;
+</li>
+<li>настройки, позволяющие эмулировать загруженность сети.
+</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-3" class="outline-2">
+<h2 id="sec-3"><span class="section-number-2">3</span> Модули и функции</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Небольшой обзор модулей и функций, которые используются в
+распределенном программировании.
+</p>
+
+
+<p>
+<b>Global</b> <a href="http://www.erlang.org/doc/man/global.html">A Global Name Registration Facility</a>
+</p>
+
+<p>
+Регистрация имен процессов в глобальной (для всего кластера) области видимости.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">global:register_name(Name, Pid)
+global:re_register_name(Name, Pid)
+global:whereis_name(Name)
+</pre>
+</div>
+
+<p>
+При такой регистрации возможен конфликт имен. Модуль также предлагает
+средства для разрешения этого конфликта.
+</p>
+
+
+<p>
+<b>net_adm</b> <a href="http://www.erlang.org/doc/man/net_adm.html">Various Erlang Net Administration Routines</a>
+</p>
+
+<p>
+Тут есть популярная функция:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">net_adm:ping(node)
+</pre>
+</div>
+
+
+<p>
+<b>erlang</b> <a href="http://www.erlang.org/doc/man/erlang.html">The Erlang BIFs</a>
+</p>
+
+<p>
+Среди можножества Erlang BIFs есть:
+</p>
+
+<ul class="org-ul">
+<li>node() &#x2013; узнать имя своего узла;
+</li>
+<li>nodes() &#x2013; получить список узлов, с которым соединен данный узел;
+</li>
+<li>monitor_node(Node, Flag) &#x2013; включить/выключить мониторинг состояния узла;
+</li>
+<li>disconnect_node(Node) &#x2013; отсоединиться от узла;
+</li>
+<li>и другие.
+</li>
+</ul>
+
+<p>
+Все функции для запуска процесса имеют варианты запуска на другом узле
+</p>
+
+<ul class="org-ul">
+<li>spawn(Fun);
+</li>
+<li>spawn(Node, Fun);
+</li>
+<li>spawn(Module, Function, Args);
+</li>
+<li>spawn(Node, Module, Function, Args);
+</li>
+<li>spawn_link(Fun);
+</li>
+<li>spawn_link(Node, Fun);
+</li>
+<li>spawn_link(Module, Function, Args);
+</li>
+<li>spawn_link(Node, Module, Function, Args).
+</li>
+</ul>
+
+
+<p>
+<b>net_kernel</b>
+<a href="http://www.erlang.org/doc/man/net_kernel.html">Erlang Networking Kernel</a>
+</p>
+
+<p>
+Соединиться с другим узлом:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">net_kernel:connect_node/1
+</pre>
+</div>
+
+<p>
+Дать имя своему узлу, настроить heart beat:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">net_kernel:start([Name, shortnames])
+net_kernel:start([Name, longnames, HeartBeat])
+net_kernel:set_net_ticktime(5)
+</pre>
+</div>
+
+<p>
+<b>rpc</b>
+<a href="http://www.erlang.org/doc/man/rpc.html">Remote Procedure Call Services</a>
+</p>
+
+<p>
+Понятно, что этот модуль очень важный и полезный :)
+</p>
+
+<p>
+Синхронный вызов функции на другом узле:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:call(Node, Module, Function, Args)
+rpc:call(Node, Module, Function, Args, Timeout)
+</pre>
+</div>
+
+<p>
+Асинхронный вызов функции:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">Res = rpc:asyn_call(node, module, function, arguments)
+</pre>
+</div>
+<p>
+и отложенное получение результата, блокирующее:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:yield(Res)
+</pre>
+</div>
+<p>
+и не блокирующее:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:nb_yield(Res, Timeout) (non blocking)
+</pre>
+</div>
+
+<p>
+Синхронный вызов функции на всех, или на указанных узлах в кластере:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:multicall(Module, Function, Args)
+rpc:multicall(Nodes, Module, Function, Args)
+rpc:multicall(Module, Function, Args, Timeout)
+rpc:multicall(Nodes, Module, Function, Args, Timeout)
+</pre>
+</div>
+
+<p>
+Асинхронный вызов функции, когда результат вообще не нужен:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:cast(Node, Module, Function, Args)
+</pre>
+</div>
+
+<p>
+Бродкаст сообщения зарегистрированному процессу на указанных узлах.
+С подтверждением получения:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:sbcast(Nodes, Name, Msg)
+</pre>
+</div>
+
+<p>
+Без подтверждения получения:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">rpc:abcast(Nodes, Name, Msg)
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-4" class="outline-2">
+<h2 id="sec-4"><span class="section-number-2">4</span> Распределенное OTP приложение</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Одно из удобных высокоуровневых средств, это распределенное OTP приложение.
+</p>
+
+<p>
+Тема хорошо раскрыта у Фреда Хеберта в LYSE, в главе <a href="http://learnyousomeerlang.com/distributed-otp-applications">Distributed OTP Applications</a>.
+</p>
+
+<p>
+Обычное OTP приложение имеет состояния: loaded, started, stopped, uploaded.
+У распределенного еще добавляется состояние running.
+</p>
+
+<p>
+В кластере загружаются и запускаются копии приложения на всех узлах. Но только одно из них
+находится в состоянии running &#x2013; реально выполняется. Остальные не выполняются, ждут.
+Если узел с running приложением падает, то начинает выполняться одно из приложений на другом узле.
+Это механизм Failover &#x2013; резервный узел берет на себя функцию упавшего основного узла.
+</p>
+
+<p>
+Затем, когда упавший узел восстанавливается, приложение на нем снова запускается, а резервное
+переходит в режим ожидания. Это механизм Takeover.
+</p>
+
+<p>
+Мониторинг состояния узлов, Failover и Takeover OTP берет на себя. Но это не значит,
+что программисту ничего делать не нужно. Когда приложение падает, оно теряет свое состояние.
+Как сохранить это состояние, как восстановить после падения, как передать из одного
+приложения другому &#x2013; это все на совести программиста.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-5" class="outline-2">
+<h2 id="sec-5"><span class="section-number-2">5</span> Net Split</h2>
+<div class="outline-text-2" id="text-5">
+<p>
+Есть еще одна интересная проблема в распределенных системах. Суть ее в том, что
+узел может не упасть, но потерять соединение с другим узлом. При этом оба узла
+продолжают работать, но не могут взаимодействовать друг с другом. И оба считают,
+что другой узел упал.
+</p>
+
+<p>
+Если они хранят и модифицируют какие-то состояния внутри себя, то эти состояния
+рассинхронизируются. И после восстановления связи возникает проблема &#x2013; состояния
+нужно опять синхронизировать.
+</p>
+
+<p>
+Ситуация похожа на конфликт в системе контроля версий, когда один и тот же
+исходник одновременно модифицировали два программиста. Но такой конфликт программисты
+исправят вручную, а с Net Split система должна как-то справится автоматически.
+</p>
+
+<p>
+Особенно актуальна эта проблема для распределенных баз данных. Им, так или иначе,
+нужно вернуть целостность данных. Тут есть разные подходы: хранение всех копий данных
+с временными метками, Vector Clock, отдать конфликтующие данные клиенту, чтобы он
+сам с этим разбирался и др.
+</p>
+
+<p>
+Это целый мир распределенных хранилищ данных, неизведанный и увлекательный,
+отдельная большая тема для разговора :)
+</p>
+</div>
+</div>
+</div>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
