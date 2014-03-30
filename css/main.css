@@ -1,3 +1,7 @@
+h1 { font-size:200%; }
+h2 { font-size:170%; }
+h3 { font-size:140%; }
+
 #header {
     background-color:#f90;
     padding:10px;
