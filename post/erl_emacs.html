@@ -1,0 +1,81 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Делаем свои шаблоны Erlang модулей для Emacs</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>Делаем свои шаблоны Erlang модулей для Emacs</h1>
+
+<p><i>12 июня 2012</i><p>
+
+<p><strong>erlang-mode</strong> для Emacs включает довольно приличный набор шаблонов. Попробуйте выполнить <code>Meta-X tempo-temp Tab Tab</code>, и увидите что их там 23 штуки. </p>
+<p>Но с ними связаны некоторые неудобства. Во-первых, довольно громоздкий способ вызова (впрочем, это можно обернуть в свою функцию, с более лаконичным именем). Во-вторых, сами шаблоны трудно модифицировать и добавлять (они определены здесь: <code>/usr/lib/erlang/lib/tools-2.6.6.3/emacs/erlang_appwiz.el</code>). А хотелось бы, чтобы каждый шаблон был определен в отдельном файле и был удобен для модификаций.</p>
+<p>К счастью, при некотором знании <strong>elisp</strong> Emacs позволяет сделать все так, как нам хочется :) Для начала определимся, где мы будем их хранить. Например тут: <code>~/emacs.d/tpl</code>. И положим туда, например, шаблон Erlang-модуля:</p>
+<div class="codehilite"><pre><span class="p">-</span><span class="ni">module</span><span class="p">(</span><span class="n">module_tpl</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">author</span><span class="p">(</span><span class="n">&#39;Vasja Pupkin &lt;pupkin@somewhere.com&gt;&#39;</span><span class="p">).</span>
+
+<span class="p">-</span><span class="ni">export</span><span class="p">([]).</span>
+
+<span class="c">%%% module API</span>
+</pre></div>
+<p>Или <a href="https://github.com/yzh44yzh/emacs-settings/blob/master/tpl/gen_server_tpl.erl">вот такой шаблон</a> для gen_server. Или <a href="https://github.com/yzh44yzh/emacs-settings/blob/master/tpl/supervisor_tpl.erl">вот такой шаблон</a> для supervisor.</p>
+<p>Затем определим где-нибудь (например в <code>~/.emacs.d/init.el</code>) функцию на elisp, которая будет копировать нужный файл в проект и модифицировать его соотвественно указанному имени. Много кода не понадобится :)</p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">defun</span> <span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">file</span> <span class="p">(</span><span class="n">module</span><span class="o">-</span><span class="n">name</span> <span class="n">tpl</span><span class="o">-</span><span class="n">file</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">setq</span> <span class="k">new</span><span class="o">-</span><span class="n">file</span> <span class="p">(</span><span class="nb">format</span> <span class="s">&quot;%s.erl&quot;</span> <span class="n">module</span><span class="o">-</span><span class="n">name</span><span class="p">))</span>
+  <span class="p">(</span><span class="n">copy</span><span class="o">-</span><span class="n">file</span> <span class="n">tpl</span><span class="o">-</span><span class="n">file</span> <span class="k">new</span><span class="o">-</span><span class="n">file</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">switch</span><span class="o">-</span><span class="n">to</span><span class="o">-</span><span class="n">buffer</span> <span class="p">(</span><span class="n">find</span><span class="o">-</span><span class="n">file</span> <span class="k">new</span><span class="o">-</span><span class="n">file</span><span class="p">))</span>
+  <span class="p">(</span><span class="n">search</span><span class="o">-</span><span class="n">forward</span> <span class="s">&quot;(&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">setq</span> <span class="n">begin</span> <span class="p">(</span><span class="n">point</span><span class="p">))</span>
+  <span class="p">(</span><span class="n">search</span><span class="o">-</span><span class="n">forward</span> <span class="s">&quot;)&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">backward</span><span class="o">-</span><span class="n">char</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">kill</span><span class="o">-</span><span class="n">region</span> <span class="n">begin</span> <span class="p">(</span><span class="n">point</span><span class="p">))</span>
+  <span class="p">(</span><span class="n">insert</span> <span class="n">module</span><span class="o">-</span><span class="n">name</span><span class="p">))</span>
+</pre></div>
+<p>Но использовать эту функцию напрямую неудобно, ибо придется прописывать полный путь к шаблону. Я вот даже не делал ее интерактивной. Мне кажется, лучше на каждый шаблон сделать отдельную функцию, которая запросит у пользователя только имя модуля, а где искать шаблон она будет знать сама.</p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">defun</span> <span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">module</span> <span class="p">(</span><span class="n">module</span><span class="o">-</span><span class="n">name</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">interactive</span> <span class="s">&quot;MModule name:&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">file</span> <span class="n">module</span><span class="o">-</span><span class="n">name</span> <span class="s">&quot;~/.emacs.d/tpl/module_tpl.erl&quot;</span><span class="p">))</span>
+
+<span class="p">(</span><span class="n">defun</span> <span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">supervisor</span> <span class="p">(</span><span class="n">module</span><span class="o">-</span><span class="n">name</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">interactive</span> <span class="s">&quot;MModule name:&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">file</span> <span class="n">module</span><span class="o">-</span><span class="n">name</span> <span class="s">&quot;~/.emacs.d/tpl/supervisor_tpl.erl&quot;</span><span class="p">))</span>
+
+<span class="p">(</span><span class="n">defun</span> <span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">gen</span><span class="o">-</span><span class="n">server</span> <span class="p">(</span><span class="n">module</span><span class="o">-</span><span class="n">name</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">interactive</span> <span class="s">&quot;MModule name:&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">erl</span><span class="o">-</span><span class="k">new</span><span class="o">-</span><span class="n">file</span> <span class="n">module</span><span class="o">-</span><span class="n">name</span> <span class="s">&quot;~/.emacs.d/tpl/gen_server_tpl.erl&quot;</span><span class="p">))</span>
+</pre></div>
+<p>Ну вот, теперь, если нам нужно создать в проекте новый модуль gen_server, то мы вызываем <code>Meta-X erl-new-gen Tab</code>, указываем имя модуля, и он создается из шаблона и открывается у нас в редакторе.</p>
+<p>Очевидно, тут речь идет о создании новых модулей, а не о вставке шаблонов кода в уже существующие файлы. Это тоже сделать не сложно, но я пока не делал :)</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>

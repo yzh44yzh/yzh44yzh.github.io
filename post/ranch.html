@@ -1,0 +1,131 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Эффективный TCP сервер с помощью Ranch Acceptor Pool</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>Эффективный TCP сервер с помощью Ranch Acceptor Pool</h1>
+<p><i>12 июня 2012</i><p>
+
+<h2>Интро</h2>
+<p>Допустим, у нас есть задача написать эффективный сервер, который будет работать с мобильными клиентами (iPhone, Android и т.д.) по TCP соединению. Допустим, это будет не веб-сервер (зачем бы писать веб-сервер, если Cowboy уже есть :).</p>
+<p>Ну что ж, читаем <a href="http://www.amazon.com/Programming-Erlang-Software-Concurrent-World/dp/193435600X">у Армстронга</a> 14 главу и/или <a href="http://www.amazon.com/ERLANG-Programming-Francesco-Cesarini/dp/0596518188">у Чезарини</a> 15 главу, берем на вооружение модуль <a href="http://www.erlang.org/doc/man/gen_tcp.html">gen_tcp</a> и уже через несколько минут (часов) весело общаемся с нашим новым-клевым сервером через telnet клиент :)</p>
+<p>Потом, конечно, делаем клиентскую часть на какой-нибудь Java (или что у вас там), подключаем какую-нибудь <a href="https://developers.google.com/protocol-buffers/docs/overview" title="Protocol Buffers">серьезную сериализацию данных</a> и все хорошо.</p>
+<p>А потом, благодаря природному любопытсву и любви совать нос во всякие блоги-книги-доки-мануалы, мы узнаем, что такая наша реализация слишком наивна, а серьезные чуваки используют <strong>Acceptor Pool</strong>. Пользуясь случаем, выражаю глубокий респект чуваку по имени Frederic Trottier-Hebert за его монументальный труд <a href="http://learnyousomeerlang.com/content">Learn you some Erlang for great good!</a>, где, помимо всего прочего, можно неплохо прошариться по части <a href="http://learnyousomeerlang.com/buckets-of-sockets">работы с сокетами в Erlang и узнать про Acceptor Pool</a>.</p>
+<p>После этого мы уже готовы реализовать свой Acceptor Pool, но все то же природное любопытство находит для нас уже готовую реализацию, да не какую-нибудь, а выделенную из самого веб-сервера <a href="https://github.com/extend/cowboy">Cowboy</a> в отдельный проект <a href="https://github.com/extend/ranch">Ranch</a>. </p>
+<p>Вот о нем и пойдет речь.</p>
+<h2>Как оно устроено</h2>
+<p>Проект документирован не сильно, но там есть сорцы с комментариями в нужных местах, чуть-чуть тестов, а объем кода не велик. Так что со всем этим не трудно разобраться. Причем пользоваться им просто, и для этого можно не вникать, как он устроен. Но мы вникнем :)</p>
+<p>Идея состоит в том, что есть:</p>
+<ol>
+<li><strong>protocol handler</strong>, который будет получать бинарные данные и чего-нибудь с ними делать, на ваше усмотрение;</li>
+<li><strong>transport handler</strong>, который инкапсулирует в себе gen_tcp или ssl или еще чего-нибудь и предоставляет к ним абстрактный интерфейс;</li>
+<li><strong>ranch_listener</strong>, который раскладывает соединения по пулам, перекидывает их туда-сюда, следит за лимитами и за изменением параметров;</li>
+<li><strong>супервизоры</strong>, которые рулят всеми процессами сверху.</li>
+</ol>
+<p>protocol handler вы пишете свой, остальное предоставляет ranch. Из transport handlerов есть в наличии ranch_tcp и ranch_ssl. А если вам нужен, к примеру UDP, то и transport handler придется написать свой.</p>
+<p>Работает оно так:</p>
+<p>Стартует <a href="https://github.com/extend/ranch/blob/master/src/ranch.erl">ranch</a>, которое суть OTP приложение. И ничего не делает, пока вы его не попросите что-нибудь сделать :) Оно такое хорошее, ленивое приложение, предпочитает ничего не делать. А попросить вы можете <strong>start_listener/6</strong>. </p>
+<p>Туда нужно передать:</p>
+<ol>
+<li>идентификатор вашего пула, который нужен на случай, если у вас несколько разных пулов для разных транспортов;</li>
+<li>сколько вы хотите acceptors в пуле;</li>
+<li>transport handler -- какой модуль будет выполнять роль транспорта (это может быть ranch_tcp, или ranch_ssl, или ваш модуль);</li>
+<li>аргументы для запуска transport handler;</li>
+<li>protocol handler -- какой-нибудь ваш модуль, который будет обрабатывать данные;</li>
+<li>аргументы для запуска protocol handler;</li>
+</ol>
+<p>Вы еще можете попросить ranch остановить пул, показать или поменять настройки для acceptors, ну и еще кой-чего по мелочи.</p>
+<p>start_listener запускает <strong>ranch_sup</strong> супервизор. Это будет корневой супервизор для вашего пула. Если вы запустите несколько разных пулов, то у каждого будет свой такой супервизор. ranch_sup тоже ленивый, сам нифига делать не хочет, а запускает <strong>ranch_listener_sup</strong> и скидывает всю работу на него :) (Вот не знаю, зачем нужен лишний супервизор).</p>
+<p><a href="https://github.com/extend/ranch/blob/master/src/ranch_listener_sup.erl">ranch_listener_sup</a>, понимая, что нельзя бесконечно спихивать работу на кого-то другого, берет на себя кое-какие заботы. Он запускает вокера <strong>ranch_listener</strong> и еще парочку супервизоров: <strong>ranch_conns_sup</strong> и <strong>ranch_acceptors_sup</strong>.</p>
+<p><a href="https://github.com/extend/ranch/blob/master/src/ranch_listener.erl">ranch_listener</a> суть gen_server. Он хранит текущие соединения в ets; считает, сколько их; следит за лимитом соединений, за обрывом соединений и т.д. Если лимит превышен, он не отвечает на вызов add_connection, тем самым заставляя вызывающий процесс зависнуть и ждать. Здесь еще предусмотренны группы пулов, с отдельным лимитом в каждой группе и возможностью перекладывать соединения из одной группы в другую. Но это, насколько я вижу, не используется. Единственный вызов add_connection из модуля ranch_acceptor жестко задает группу default. </p>
+<p><strong>ranch_conns_sup</strong> для каждого нового соединения запускает новый поток в вашем модуле protocol handler, для чего модуль должен иметь функцию start_link/4. Пример такого модуля будет ниже.</p>
+<p><strong>ranch_acceptors_sup</strong> запускает нужное количество потоков <a href="https://github.com/extend/ranch/blob/master/src/ranch_acceptor.erl">ranch_acceptor</a>. И все эти acceptor занимаются тем, чем должны -- принимают соединения. Они просят тот transport handler, который им дали, принять соединение. Затем просят ranch_conns_sup создать новый поток protocol handler. Затем опять просят transport handler задать поток protocol handler как controlling process для сокета. После чего protocol handler сможет читать из него данные.<br />
+</p>
+<p>Наконец, <a href="https://github.com/extend/ranch/blob/master/src/ranch_tcp.erl">ranch_tcp</a> собственно и работает с gen_tcp. </p>
+<p>Оставим в стороне вопрос, как можно динамически менять настройки для acceptors и пойдем дальше :)</p>
+<h2>Как им пользоваться</h2>
+<p>Создаем свой protocol handler модуль. Вот, например, в тестах есть модуль, который делает эхо: <a href="https://github.com/extend/ranch/blob/master/test/echo_protocol.erl">echo_protocol</a>. </p>
+<p>Или вот кусок моего модуля:</p>
+<p>Реализуем start_link/4</p>
+<div class="codehilite"><pre><span class="nf">start_link</span><span class="p">(</span><span class="nv">ListenerPid</span><span class="p">,</span> <span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">,</span> <span class="nv">Opts</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nv">Pid</span> <span class="o">=</span> <span class="nb">spawn_link</span><span class="p">(</span><span class="no">?MODULE</span><span class="p">,</span> <span class="n">init</span><span class="p">,</span> <span class="p">[</span><span class="nv">ListenerPid</span><span class="p">,</span> <span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">,</span> <span class="nv">Opts</span><span class="p">]),</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Pid</span><span class="p">}.</span>
+
+<span class="nf">init</span><span class="p">(</span><span class="nv">ListenerPid</span><span class="p">,</span> <span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">,</span> <span class="p">_</span><span class="nv">Opts</span> <span class="o">=</span> <span class="p">[])</span> <span class="o">-&gt;</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="nn">ranch</span><span class="p">:</span><span class="n">accept_ack</span><span class="p">(</span><span class="nv">ListenerPid</span><span class="p">),</span>
+    <span class="n">loop</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">).</span>
+</pre></div>
+<p>В цикле читаем из сокета данные</p>
+<div class="codehilite"><pre><span class="nf">loop</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="k">case</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">recv</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">infinity</span><span class="p">)</span> <span class="k">of</span>
+        <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Data</span><span class="p">}</span> <span class="o">-&gt;</span> <span class="o">&lt;&lt;</span><span class="nv">Size</span><span class="p">:</span><span class="mi">16</span><span class="o">/</span><span class="n">integer</span><span class="o">&gt;&gt;</span> <span class="o">=</span> <span class="nv">Data</span><span class="p">,</span>
+            <span class="n">process_query</span><span class="p">(</span><span class="nv">Transport</span><span class="p">,</span> <span class="nv">Socket</span><span class="p">,</span> <span class="nv">Size</span><span class="p">),</span>
+            <span class="n">loop</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="nv">Transport</span><span class="p">);</span>
+        <span class="p">_</span> <span class="o">-&gt;</span> <span class="n">ok</span> <span class="o">=</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">close</span><span class="p">(</span><span class="nv">Socket</span><span class="p">)</span>
+    <span class="k">end</span><span class="p">.</span>
+</pre></div>
+<p>И обрабатываем их</p>
+<div class="codehilite"><pre><span class="nf">process_query</span><span class="p">(</span><span class="nv">Transport</span><span class="p">,</span> <span class="nv">Socket</span><span class="p">,</span> <span class="nv">Size</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">RawData</span><span class="p">}</span> <span class="o">=</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">recv</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="nv">Size</span><span class="p">,</span> <span class="n">infinity</span><span class="p">),</span>
+    <span class="nl">#rpc</span><span class="p">{</span><span class="n">action</span> <span class="o">=</span> <span class="nv">Action</span><span class="p">,</span> <span class="n">payload</span> <span class="o">=</span> <span class="nv">Payload</span><span class="p">}</span> <span class="o">=</span> <span class="nn">queries_pb</span><span class="p">:</span><span class="n">decode_rpc</span><span class="p">(</span><span class="nv">RawData</span><span class="p">),</span>
+    <span class="nv">Reply</span> <span class="o">=</span> <span class="n">process_query</span><span class="p">(</span><span class="nv">Action</span><span class="p">,</span> <span class="nv">Payload</span><span class="p">),</span>
+    <span class="nv">RSize</span> <span class="o">=</span> <span class="nb">byte_size</span><span class="p">(</span><span class="nv">Reply</span><span class="p">),</span>
+    <span class="nv">Transport</span><span class="p">:</span><span class="nb">send</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="o">&lt;&lt;</span><span class="nv">RSize</span><span class="p">:</span><span class="mi">16</span><span class="p">,</span> <span class="nv">Reply</span><span class="o">/</span><span class="n">binary</span><span class="o">&gt;&gt;</span><span class="p">).</span>
+
+<span class="nf">process_query</span><span class="p">(</span><span class="s">&quot;auth&quot;</span><span class="p">,</span> <span class="nv">RawData</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nv">Data</span> <span class="o">=</span> <span class="nn">queries_pb</span><span class="p">:</span><span class="n">decode_authquery</span><span class="p">(</span><span class="nv">RawData</span><span class="p">),</span>
+    <span class="nv">Reply</span> <span class="o">=</span> <span class="nl">#authresult</span><span class="p">{</span><span class="n">success</span> <span class="o">=</span> <span class="n">true</span><span class="p">,</span> <span class="n">uid</span> <span class="o">=</span> <span class="mi">23</span><span class="p">},</span>
+    <span class="nn">queries_pb</span><span class="p">:</span><span class="n">encode_authresult</span><span class="p">(</span><span class="nv">Reply</span><span class="p">);</span>
+</pre></div>
+<p>protocol handler есть, теперь запускаем ranch:</p>
+<div class="codehilite"><pre><span class="nn">application</span><span class="p">:</span><span class="n">start</span><span class="p">(</span><span class="n">ranch</span><span class="p">)</span>
+</pre></div>
+<p>и вызываем мега-функцию ranch:start_listen/4</p>
+<div class="codehilite"><pre><span class="nv">Port</span> <span class="o">=</span> <span class="mi">8080</span><span class="p">,</span>
+<span class="nv">NumAcceptors</span> <span class="o">=</span> <span class="mi">200</span><span class="p">,</span>
+
+<span class="nn">ranch</span><span class="p">:</span><span class="n">start_listener</span><span class="p">(</span><span class="n">my_pool</span><span class="p">,</span> <span class="nv">NumAcceptors</span><span class="p">,</span>
+    <span class="n">ranch_tcp</span><span class="p">,</span> <span class="p">[{</span><span class="n">port</span><span class="p">,</span> <span class="nv">Port</span><span class="p">}],</span>
+    <span class="n">my_protocol_handler</span><span class="p">,</span> <span class="p">[]).</span>
+</pre></div>
+<p>И все, enjoy :)</p>
+<p>Ах да, в вашем rebar.config должна быть зависимость от ranch, конечно</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">deps</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">{</span><span class="n">ranch</span><span class="p">,</span> <span class="s">&quot;.*&quot;</span><span class="p">,</span> <span class="p">{</span><span class="n">git</span><span class="p">,</span> <span class="s">&quot;https://github.com/extend/ranch.git&quot;</span><span class="p">,</span> <span class="s">&quot;HEAD&quot;</span><span class="p">}}</span>
+<span class="p">]}.</span>
+</pre></div>
+<p>Теперь enjoy :)</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
