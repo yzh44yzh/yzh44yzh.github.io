@@ -1,0 +1,101 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Distell -- друг Erlang разработчика</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>Distell -- друг Erlang разработчика</h1>
+<p><i>30 ноября 2012</i><p>
+
+<p>Жил я долго и счастливо без <a href="https://github.com/massemanet/distel">Distell</a>, используя <strong>Emacs</strong> и <strong>erlang-mode</strong>, и чувствовал себя неплохо. Помимо всего прочего, использовал я <a href="https://github.com/rustyio/sync">sync</a>. <strong>Sync</strong> представляет собой otp-приложение, которое нужно запустить на ноде, после чего он собирает инфу обо всех сорцах и следит за изменениями в них. Как только какие-то сорцы меняются, sync перекомпилирует их и перезагружает измененные модули на ноде. Довольно удобно -- редактируешь код, сохраняешь файл, и изменения тут же подхватываются. </p>
+<p>Однако через какое-то время sync стал утомлять своими побочными эффектами. К сожалению, нельзя указать, за какими именно сорцами нужно следить. Sync сам берет инфу из рантайма и следит не только за моим кодом, но и за всеми зависимостями в папочке deps. Вроде бы это не должно мешать, ведь исходники зависимостей не меняются. Но нет, почему-то sync перегружает модули <strong>epgsql</strong> (драйвер для работы с PostgreSQL) и <strong>yaws</strong> (веб-сервер). Случается это много раз за день, в непредсказуемые моменты времени, и сопровождается обильными сообщениями на много экранов в консоли. Этот лишний информационный шум изрядно затруднял чтение интересующих меня сообщений. В итоге это мне надоело, и я стал присматриваться к альтернативам.</p>
+<p>Это была одна причина попробовать Distell. Есть и другая. </p>
+<p>Примерно месяц я работал в Intellij IDEA с <a href="http://plugins.jetbrains.com/plugin/index?pr=&amp;pluginId=7083">Erlang-плагином</a>. По причинам, о которых будет сказано позже, в другом посте, я решил вернуться к Emacs. Но теперь уже возможностей erlang-mode мне было мало. А Distell, как оказалось, дает практически все, что есть в Intellij IDEA. </p>
+<p>Я готовлю подробное сравнение <strong>Intellij IDEA + Erlang-плагин</strong> с одной стороны, и <strong>Emacs + ido + erlang-mode + Distell</strong> с другой стороны. Об этом будет отдельная статья. Пока скажу только, что IDEA будет очень хорошим вариантом для тех, кто хотел бы разрабатывать на Erlang, но привык пользоваться мощной IDE и неуютно чувствует себя в Emacs.</p>
+<p>Итак, в чем фишка Distell? Он представляет собой расширение Emacs, которое умеет общаться с работающей Erlang-нодой. Таким образом он имеет всю актуальную информацию из рантайма и может выполнять свои запросы на ноде. Поэтому ему не нужен синтаксический анализ исходного кода, Distell и так знает, какие модули и функции там есть. Отсюда умный автокомплит, навигация по коду, заменяющая ненужный TAGS, find usages и т.д.</p>
+<p>Distell умеет показать список процессов и инфу по ним, умеет интегрироваться с профайлером и дебагером, показывать документацию и т.д. Это все описано <a href="http://alexott.net/ru/writings/emacs-devenv/EmacsErlang.html#sec8">у Алекса Отта</a> и <a href="http://bc.tech.coop/blog/070528.html">еще тут</a>, так что я повторяться не буду. А лучше я расскажу о том, о чем не написано.</p>
+<p>Итак, нам нужна замена sync, чтобы с удобством обновлять измененные модули на ноде. Distel предлагает две функции:</p>
+<ul>
+<li><strong>erl-reload-module</strong> C-c C-d L </li>
+<li><strong>erl-reload-modules</strong> C-c C-d r</li>
+</ul>
+<p>Первая перегружает один модуль, соответствующий активному буферу. Вторая перегружает все измененные модули. Но прежде, чем перегрузить модуль, его нужно скомпилировать. Этого Distel сам не делает.</p>
+<p>В erlang-mode есть функция <strong>erlang-compile</strong>, но она практически бесполезна. Потому как наш проект, конечно, является otp-приложением правильной структуры (ebin, include, src, priv, test), и собирать его нужно через rebar :)</p>
+<p>Можно воспользоваться более общей функцией compile, если сказать ей, какой командой собирать проект. Например:</p>
+<div class="codehilite"><pre>  <span class="p">(</span><span class="n">compile</span> <span class="s">&quot;cd ..; rebar compile&quot;</span><span class="p">)</span>
+</pre></div>
+<p>или </p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">compile</span> <span class="s">&quot;cd ..; make&quot;</span><span class="p">)</span>
+</pre></div>
+<p>если у вас есть свой Makefile с более сложной сборкой.</p>
+<p>Итак, сперва собираем</p>
+<div class="codehilite"><pre>  <span class="n">M</span><span class="o">-</span><span class="n">x</span> <span class="n">compile</span> <span class="s">&quot;cd ..; make&quot;</span>
+</pre></div>
+<p>Потом перегружаем</p>
+<div class="codehilite"><pre>  <span class="n">C</span><span class="o">-</span><span class="n">c</span> <span class="n">C</span><span class="o">-</span><span class="n">d</span> <span class="n">L</span>
+</pre></div>
+<p>Гм, неудобно. Много букв писать надо :) Ну для начала зададим дефолтную команду компиляции:</p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">setq</span><span class="o">-</span><span class="n">default</span> <span class="n">compile</span><span class="o">-</span><span class="n">command</span> <span class="s">&quot;cd ..; make&quot;</span><span class="p">)</span>
+</pre></div>
+<p>Затем повесим шоткат на compile, и шоткат попроще на reload:</p>
+<div class="codehilite"><pre>  <span class="p">(</span><span class="n">global</span><span class="o">-</span><span class="n">set</span><span class="o">-</span><span class="n">key</span> <span class="p">[</span><span class="n">f6</span><span class="p">]</span> <span class="s">&#39;compile)</span>
+<span class="s">  (global-set-key [f7] &#39;</span><span class="n">erl</span><span class="o">-</span><span class="n">reload</span><span class="o">-</span><span class="n">module</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">global</span><span class="o">-</span><span class="n">set</span><span class="o">-</span><span class="n">key</span> <span class="p">[</span><span class="n">f8</span><span class="p">]</span> <span class="err">&#39;</span><span class="n">erl</span><span class="o">-</span><span class="n">reload</span><span class="o">-</span><span class="n">modules</span><span class="p">)</span>
+</pre></div>
+<p>Уже лучше. F6, F7 и готово. Но все-таки хотелось бы сделать все в одно действие. Не вопрос, пишем свою функцию и вешаем шоткат на нее:</p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">defun</span> <span class="k">my</span><span class="o">-</span><span class="n">sync</span><span class="p">()</span>
+  <span class="p">(</span><span class="n">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">compile</span> <span class="s">&quot;cd ..; make&quot;</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">erl</span><span class="o">-</span><span class="n">reload</span><span class="o">-</span><span class="n">modules</span><span class="p">))</span>
+<span class="p">(</span><span class="n">global</span><span class="o">-</span><span class="n">set</span><span class="o">-</span><span class="n">key</span> <span class="p">[</span><span class="n">f8</span><span class="p">]</span> <span class="err">&#39;</span><span class="k">my</span><span class="o">-</span><span class="n">sync</span><span class="p">)</span>
+</pre></div>
+<p>И вот тут начинаются проблемы. Оказывается erl-reload-modules без аргументов вызвать нельзя, она требует ссылку на ноду. Ссылку эту взять негде. Пришлось лезть в сорцы Distell и глядеть, как там все реализовано. Оказалось, там есть функция <strong>erl-target-node</strong>. Но мой скрипт ее не видит и не может вызывать. Посему нужно залезть в path/to/distell/elisp/erl-service.el, найти 26 строку, где определена erl-reload-modules, и добавить (interactive). После этого ее можно вызывать :)</p>
+<p>Учтем еще пару нюансов:</p>
+<ul>
+<li>перед сборкой нужно сохранить буфер</li>
+<li>compile работает асинхронно, поэтому вызов erl-reload-modules произойдет раньше, чем компиляция закончится. </li>
+</ul>
+<p>Посему нужно делать так:</p>
+<div class="codehilite"><pre><span class="p">(</span><span class="n">defun</span> <span class="k">my</span><span class="o">-</span><span class="n">sync</span><span class="p">()</span>
+  <span class="p">(</span><span class="n">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">save</span><span class="o">-</span><span class="n">buffer</span><span class="p">)</span>
+  <span class="p">(</span><span class="n">compile</span> <span class="s">&quot;cd ..; make&quot;</span><span class="p">)</span> <span class="p">;;</span> <span class="n">asyn</span> <span class="n">call</span><span class="p">,</span> <span class="n">emacs</span> <span class="n">doesn</span><span class="s">&#39;t wait for compilation end</span>
+<span class="s">  (sleep-for 2)</span>
+<span class="s">  (erl-reload-modules (erl-target-node)))</span>
+<span class="s">(global-set-key [f8] &#39;</span><span class="k">my</span><span class="o">-</span><span class="n">sync</span><span class="p">)</span>
+</pre></div>
+<p>Теперь все работает как надо.</p>
+
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
