@@ -1,0 +1,155 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>О TCP сокете для чайников</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>О TCP сокете для чайников</h1>
+<p><i>6 июля 2012</i><p>
+
+<p>Очень упрощенный рассказ про TCP сокет для тех, кто не в теме :)</p>
+<p>Сидел я, писал внутреннюю документацию по своему проекту. И нужно было, помимо прочего, описать реализацию сокета со стороны клиента. Я сам делал эту реализацию на Java для специфического клиента, выполняющего функциональное и стресс тестирование сервера. А нужна будет еще одна реализация на .NET для Unity приложения, которое и будет настоящим клиентом моего сервера. И эту реализацию будет писать другой разработчик.</p>
+<p>И вот писал я о своем Java сокете, и понял, что неплохо было бы сперва рассказать, как вообще работает TCP сокет. И понял, что такой рассказ можно выложить публично, ибо это уже не есть специфическая внутренняя документация. Ну вот и выкладываю :)</p>
+<p>Как работает сокет на низком уровне? Речь идет о TCP Full Duplex сокете, без всяких надстроек типа HTTP протокола. Full Duplex -- это две трубы. По одной трубе данные текут с клиента на сервер. По другой трубе текут с сервера на клиент. Текут они маленькими пакетами, например, по 1500 байт (в зависимости от настроек сети). </p>
+<p>Трубы работают независимо друг от друга. То, что течет по одной, никак не мешает тому, что течет по другой.</p>
+<p>И чтобы с этим работать, нужно решить две проблемы.</p>
+<h2>Проблема извлечения данных из сокета</h2>
+<p>Вот клиент что-то посылает на сервер, какой-то цельный кусок данных. Он может весь уместиться в один пакет. А может не уместиться, может быть разбит на несколько пакетов. TCP гарантирует, что все эти пакеты дойдут, и дойдут в нужном порядке. Но сервер как-то должен знать, как из этих пакетов опять собрать цельный кусок данных. </p>
+<p>Давайте условно представим, что клиент посылает такой запрос:</p>
+<div class="codehilite"><pre><span class="p">{</span>
+<span class="n">action:</span><span class="s">&quot;login&quot;</span><span class="p">,</span>
+<span class="n">name:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span>
+<span class="n">password:</span><span class="s">&quot;123&quot;</span>
+<span class="p">}</span>
+</pre></div>
+<p>Мы сейчас вообще не трогаем тему сериализации данных, в каком формате они передаются. Предположим, у нас есть такой объект, как-то описанный на том языке программирования, на котором мы пишем клиентскую часть. И этот объект каким-то образом сериализован в массив байтов. Допустим, в сериализованом виде он будет выглядеть так:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">action:</span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="n">name:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="n">password:</span><span class="s">&quot;123&quot;</span><span class="p">}</span>
+</pre></div>
+<p>Допустим, объект большой, и массив байтов получился большой. В один пакет он не влез, был разделен и пошел по трубе в виде 3х пакетов:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">action:</span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="n">n</span>
+<span class="n">ame:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="n">passwor</span>
+<span class="n">d:</span><span class="s">&quot;123&quot;</span><span class="p">}</span>
+</pre></div>
+<p>Стало быть, сервер читает из трубы первый кусок <em>{action:"login",n</em>. И что ему с этим делать? Можно попробовать десериализовать. Если получим ошибку, то будет ясно, что данные не полные, и нужно получить больше. И так каждый раз, когда что-то приходит из трубы, мы будем пытаться это десериализовать. Получилось -- хорошо, интерпретируем и отправляем дальше на обработку. Не получилось -- ждем больше данных.</p>
+<p>Но тут плохо то, что лишние попытки десериализации будут создавать лишнюю нагрузку на CPU. Нужен другой вариант. </p>
+<p>В Erlang модуль gen_tcp предлагает разные варианты решения этой задачи. Давайте воспользуемся тем, что уже есть. Например, есть вариант, в котором сервер предполагает, что каждый клиентский запрос имеет заголовок. И в заголовке указана длинна данных, составляющих этот запрос. </p>
+<p>То есть, целый запрос выглядит так:</p>
+<div class="codehilite"><pre><span class="mi">42</span><span class="p">{</span><span class="n">action:</span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="n">name:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="n">password:</span><span class="s">&quot;123&quot;</span><span class="p">}</span>
+</pre></div>
+<p>А разбитый на пакеты так:</p>
+<div class="codehilite"><pre><span class="mi">42</span><span class="p">{</span><span class="n">action:</span><span class="s">&quot;login&quot;</span>
+<span class="p">,</span><span class="n">name:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="n">passw</span>
+<span class="nb">ord</span><span class="p">:</span><span class="s">&quot;123&quot;</span><span class="p">}</span>
+</pre></div>
+<p>И когда на сервер приходит <em>42{action:"login"</em>, то сервер читает заголовок, видит в нем длину запроса -- 42 байта, и понимает, что нужно дождаться, пока придут эти 42 байта. И после этого данные можно десериализовать и интерпретировать. Например, интерпретация может заключаться в том, что сервер вызовет у себя метод <em>login</em> с аргументами "Bob" и "123". Точно также будет извлекать данные и клиент, когда он будет получать их с сервера.</p>
+<p>Размер заголовка может быть 1 или 2 или 4 байта. Такие варианты предлагает <em>gen_tcp</em>, когда используется в активном режиме. (А в пассивном режиме мы сами извлекаем и интерпретируем этот заголовок, так что вольны делать как угодно).</p>
+<p>Какой размер заголовка лучше? В 1 байт влезет число <code>2 ^ 8 = 256</code>. Значит запрос не может быть больше 256 байт. Это слишком мало. В 2 байта влезет число <code>2 ^ 16 = 65536</code>. Значит запрос может быть до 65536 байт. Этого вполне достаточно для большинства случаев.</p>
+<p>Но, допустим, вам может понадобиться отправлять на сервер большие запросы, так что и 2х байт на заголовок будет мало. Вот мне это нужно, и я взял заголовок в 4 байта. </p>
+<p>Взять-то взял, но меня душит жаба :) Таких больших запросов будет немного. В основном все запросы будут маленькими, но все равно все они будут использовать 4-х байтный заголовок. Тут есть почва для оптимизации. Например, можно использовать два заголовка. Первый, однобайтный, будет указывать длину второго. А второй, 1-4 байтный, будет указывать длину пакета :) Или можно использовать безразмерный int, занимающий 1-4 байта, как это сделано в AMF сериализации. При желании можно сэкономить трафик.</p>
+<p>Конечно, такая мелочная оптимизация только рассмешит тех, кто использует HTTP :) Ибо HTTP не мелочится, и в каждом запросе посылает нехилую пачку метаданных, совершенно не нужных серверу, и потому транжирит трафик в масштабах не сравнимых с моим аккуратным TCP сокетом :)</p>
+<h2>Проблема сопоставления запросов и ответов</h2>
+<p>Вот клиент сделал запрос, и чуть позже из другой трубы к нему что-то пришло. Что это, ответ на последний запрос? Или ответ на какой-то более ранний запрос? Или вообще не ответ, а активный пуш данных по инициативе сервера? Клиент должен как-то знать, что с этим делать.</p>
+<p>Хороший вариант -- каждый запрос клиента должен иметь уникальный идентификатор. Ответ с сервера будет иметь такой же идентификатор. Так что можно будет определить, на какой именно запрос пришел ответ.</p>
+<p>Вообще нам нужны три варианта взаимодействия клиента и сервера:</p>
+<ul>
+<li>Клиент посылает запрос на сервер и хочет получить ответ</li>
+<li>Клиент посылает запрос на сервер и ему не нужен никакой ответ</li>
+<li>Сервер активно пушит данные клиенту</li>
+</ul>
+<p>(На самом деле есть и 4й вариант, когда сервер активно посылает запрос на клиент и хочет получить ответ. Но мне такой вариант никогда не был нужен и я его не реализовывал).</p>
+<p>В первом случае мы добавляем в запрос идентификатор:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">qid:15</span><span class="p">,</span><span class="n">action:</span><span class="s">&quot;login&quot;</span><span class="p">,</span><span class="n">name:</span><span class="s">&quot;Bob&quot;</span><span class="p">,</span><span class="n">password:</span><span class="s">&quot;123&quot;</span><span class="p">}</span>
+</pre></div>
+<p>И получаем ответ:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">qid:15</span><span class="p">,</span><span class="n">success:true</span><span class="p">}</span>
+</pre></div>
+<p>Во втором случае мы не добавляем в запрос идентификатор:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">action:</span><span class="s">&quot;logout&quot;</span><span class="p">}</span>
+</pre></div>
+<p>И тогда сервер знает, что ответ не требуется, и не отвечает.</p>
+<p>В третьем случае данные с сервера приходят без идентификатора:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">event:</span><span class="s">&quot;invitation&quot;</span><span class="p">,</span><span class="n">fromUser:</span><span class="s">&quot;Bill&quot;</span><span class="p">,</span><span class="n">msg:</span><span class="s">&quot;Hello, wanna chat?&quot;</span><span class="p">}</span>
+</pre></div>
+<p>И тогда клиент знает, что это не ответ на какой-то запрос, а активный пуш с сервера.</p>
+<h2>Некоторые детали реализации</h2>
+<p>Отправляем данные с клиента с 4х байтным заголовком:</p>
+<div class="codehilite"><pre><span class="kd">protected</span> <span class="kt">void</span> <span class="nf">send</span><span class="o">(</span><span class="kt">byte</span><span class="o">[]</span> <span class="n">data</span><span class="o">)</span> <span class="o">{</span>
+    <span class="k">try</span> <span class="o">{</span>
+        <span class="kt">byte</span><span class="o">[]</span> <span class="n">header</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[]{</span>
+            <span class="o">(</span><span class="kt">byte</span><span class="o">)</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;&gt;&gt;</span> <span class="mi">24</span><span class="o">),</span>
+            <span class="o">(</span><span class="kt">byte</span><span class="o">)</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;&gt;&gt;</span> <span class="mi">16</span><span class="o">),</span>
+            <span class="o">(</span><span class="kt">byte</span><span class="o">)</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span> <span class="o">&gt;&gt;&gt;</span> <span class="mi">8</span><span class="o">),</span>
+            <span class="o">(</span><span class="kt">byte</span><span class="o">)</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">)</span>
+        <span class="o">};</span>
+        <span class="n">out</span><span class="o">.</span><span class="na">write</span><span class="o">(</span><span class="n">header</span><span class="o">);</span>
+        <span class="n">out</span><span class="o">.</span><span class="na">write</span><span class="o">(</span><span class="n">data</span><span class="o">);</span>
+        <span class="n">out</span><span class="o">.</span><span class="na">flush</span><span class="o">();</span>
+    <span class="o">}</span> <span class="k">catch</span> <span class="o">(</span><span class="n">IOException</span> <span class="n">ioException</span><span class="o">)</span> <span class="o">{</span>
+        <span class="n">ioException</span><span class="o">.</span><span class="na">printStackTrace</span><span class="o">();</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+<p>Читаем данные на сервере</p>
+<div class="codehilite"><pre><span class="nf">handle_info</span><span class="p">(</span><span class="n">read_data</span><span class="p">,</span> <span class="nl">#state</span><span class="p">{</span><span class="n">socket</span> <span class="o">=</span> <span class="nv">Socket</span><span class="p">,</span> <span class="n">transport</span> <span class="o">=</span> <span class="nv">Transport</span><span class="p">}</span> <span class="o">=</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="k">case</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">recv</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">500</span><span class="p">)</span> <span class="k">of</span>
+        <span class="p">{</span><span class="n">ok</span><span class="p">,</span>  <span class="o">&lt;&lt;</span><span class="nv">Size</span><span class="p">:</span><span class="mi">32</span><span class="o">/</span><span class="n">integer</span><span class="o">&gt;&gt;</span><span class="p">}</span> <span class="o">-&gt;</span>
+            <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">RawData</span><span class="p">}</span> <span class="o">=</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">recv</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="nv">Size</span><span class="p">,</span> <span class="n">infinity</span><span class="p">),</span>
+            <span class="n">do_something</span><span class="p">(</span><span class="nv">RawData</span><span class="p">),</span>
+            <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">};</span>
+        <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="n">timeout</span><span class="p">}</span> <span class="o">-&gt;</span> <span class="n">self</span><span class="p">()</span> <span class="o">!</span> <span class="n">read_data</span><span class="p">,</span>
+            <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">};</span>
+        <span class="p">_</span> <span class="o">-&gt;</span> <span class="n">ok</span> <span class="o">=</span> <span class="nv">Transport</span><span class="p">:</span><span class="n">close</span><span class="p">(</span><span class="nv">Socket</span><span class="p">),</span>
+            <span class="p">{</span><span class="n">stop</span><span class="p">,</span> <span class="n">normal</span><span class="p">,</span> <span class="nv">State</span><span class="p">}</span>
+    <span class="k">end</span><span class="p">;</span>
+</pre></div>
+<p>Отправляем данные с сервера</p>
+<div class="codehilite"><pre><span class="nv">Reply</span> <span class="o">=</span> <span class="n">some_data</span><span class="p">(),</span>
+<span class="nv">RSize</span> <span class="o">=</span> <span class="nb">byte_size</span><span class="p">(</span><span class="nv">Reply</span><span class="p">),</span>
+<span class="nv">Transport</span><span class="p">:</span><span class="nb">send</span><span class="p">(</span><span class="nv">Socket</span><span class="p">,</span> <span class="o">&lt;&lt;</span><span class="nv">RSize</span><span class="p">:</span><span class="mi">32</span><span class="p">,</span> <span class="nv">Reply</span><span class="o">/</span><span class="n">binary</span><span class="o">&gt;&gt;</span><span class="p">).</span>
+</pre></div>
+<p>Читаем данные на клиенте</p>
+<div class="codehilite"><pre><span class="kd">protected</span> <span class="kt">byte</span><span class="o">[]</span> <span class="nf">receive</span><span class="o">()</span> <span class="kd">throws</span> <span class="n">IOException</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">b1</span> <span class="o">=</span> <span class="n">in</span><span class="o">.</span><span class="na">read</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">b2</span> <span class="o">=</span> <span class="n">in</span><span class="o">.</span><span class="na">read</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">b3</span> <span class="o">=</span> <span class="n">in</span><span class="o">.</span><span class="na">read</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">b4</span> <span class="o">=</span> <span class="n">in</span><span class="o">.</span><span class="na">read</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">len</span> <span class="o">=</span> <span class="o">((</span><span class="n">b1</span> <span class="o">&lt;&lt;</span> <span class="mi">24</span><span class="o">)</span> <span class="o">+</span> <span class="o">(</span><span class="n">b2</span> <span class="o">&lt;&lt;</span> <span class="mi">16</span><span class="o">)</span> <span class="o">+</span> <span class="o">(</span><span class="n">b3</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="o">)</span> <span class="o">+</span> <span class="n">b4</span><span class="o">);</span>
+    <span class="kt">byte</span><span class="o">[]</span> <span class="n">data</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[</span><span class="n">len</span><span class="o">];</span>
+    <span class="n">in</span><span class="o">.</span><span class="na">read</span><span class="o">(</span><span class="n">data</span><span class="o">);</span>
+    <span class="k">return</span> <span class="n">data</span><span class="o">;</span>
+<span class="o">}</span>
+</pre></div>
+<p>И последнее: запись и чтение данных на клиенте должны работать в разных потоках, ибо чтение -- блокирующая операция. Пока процесс висит на <em>in.read(data)</em>, он больше ничего не может делать. А процесс висит там большую часть времени :)</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
