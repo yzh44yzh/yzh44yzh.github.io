@@ -1,0 +1,108 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>dp_push -- Erlang библиотека для работы с Apple Push Notification Service</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>dp_push -- Erlang библиотека для работы с Apple Push Notification Service</h1>
+<p><i>24 июля 2012</i><p>
+
+<p>Библиотека для работы с APNs от <a href="http://dieselpuppet.com/">dieselpuppet.com</a>.</p>
+
+<h2>APNs -- что это и зачем</h2>
+<p>Допустим, у вас проект с клиент-серверной архитектурой, где в роли клиента выступает приложение на iOS устройстве. Ваш замечательный сервер прекрасно общается с вашим замечательным приложением, пока оно активно. </p>
+<p>Но вот пользователь запустил другое приложение, или положил девайс в карман, или оказался где-то, где нет WiFi. И увы, связи между сервером и вашим приложением больше нет. А серверу нужно доставить какие-то данные, или уведомить о каком-то событии.</p>
+<p>Для такого случая существует <a href="http://developer.apple.com/library/mac/#documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/ApplePushService/ApplePushService.html#//apple_ref/doc/uid/TP40008194-CH100-SW9">Apple Push Notification Service</a>.</p>
+<p>Вместо того, чтобы отправлять сообщение клиентскому приложению, ваш сервер может отправить сообщение на APNs. А APNs доставит его на iOS устройство, если оно доступно. Устройство покажет сообщение пользователю, и по его требованию активирует нужное приложение. </p>
+
+<h2>Как это работает</h2>
+<p>Ваш сервер соединяется через SSL сокет с APNs и передает сообщение в определенном формате. Сообщение содержит <strong>payload</strong> -- собственно данные, которые нужно передать, и <strong>device token</strong> -- идентификатор iOS устройства, которому адресовано сообщение.</p>
+<p>Однако сообщение адресовано не просто какому-то устройству, но еще и какому-то приложению, установленному на нем. Для этого при установке SSL соединения с APNs используется такой же сертификат, как тот, которым подписано ваше клиентское приложение.</p>
+<p>APNs имеет <a href="http://developer.apple.com/library/mac/#documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/ApplePushService/ApplePushService.html#//apple_ref/doc/uid/TP40008194-CH100-SW9">хорошую документацию</a>, где описаны все подробности.</p>
+<p>Так же рекомендую <a href="http://www.raywenderlich.com/3443/apple-push-notification-services-tutorial-part-12">замечательный тутор</a>, который дает хороший старт. И, в частности, раскрывает непростую тему сертификатов :)</p>
+
+<h2>dp_push -- что это и зачем</h2>
+<p>Поскольку работать с APNs нужно практически в каждом нашем проекте, решено это унифицировать и вынести в отдельную библиотеку <a href="https://github.com/yzh44yzh/dp-push">Diesel Puppet push</a>. Никаких тайных секретов в этом функционале нет, нужно просто аккуратно его реализовать. Посему мы смело выкладываем модуль в open source, под <a href="http://en.wikipedia.org/wiki/MIT_License">MIT лицензией</a>. </p>
+<p>Реализация довольно простая, и представляет собой OTP-приложение из 4х модулей.</p>
+<p><a href="https://github.com/yzh44yzh/dp-push/blob/master/src/dp_push.erl">dp_push.erl</a>
+Главный модуль, запускает приложение и является фасадом к функциям библиотеки.</p>
+<p><a href="https://github.com/yzh44yzh/dp-push/blob/master/src/dp_push_sup.erl">dp_push_sup.erl</a>
+Супервизор, запускает dp_push_sender и следит, что бы он не падал :)</p>
+<p><a href="https://github.com/yzh44yzh/dp-push/blob/master/src/dp_push_sender.erl">dp_push_sender.erl</a>
+gen_server, выполняет send запросы и работает с feedback сервисом (о котором ниже).</p>
+<p><a href="https://github.com/yzh44yzh/dp-push/blob/master/src/dp_push_apns.erl">dp_push_apns.erl</a>
+Содержит набор низкоуровневых функций для формирования пакетов, установки SSL соединения, отправки данных.</p>
+<p>Приложение требует кое-каких <a href="https://github.com/yzh44yzh/dp-push/blob/master/src/dp_push.app.src">настроек</a>. Они, впрочем, довольно очевидные -- куда конектится, какой сертификат использовать, и настройки для feedback сервиса (о котором ниже).</p>
+
+<h2>device token</h2>
+<p>Немного подробнее о токене. iOS устройство получает токен у APNs сервера (подробности в документации). Потом ваше клиентское приложение должно передать его вашему серверу. А сервер будет использовать для отправки сообщений.</p>
+<p>Токен имеет размер 32 байта, и выглядит примерно так:</p>
+<div class="codehilite"><pre>  <span class="mi">8253</span><span class="n">de13</span> <span class="n">f71d310d</span> <span class="mo">05</span><span class="n">a13135</span> <span class="n">e09e09b6</span> <span class="mi">32</span><span class="n">c478d5</span> <span class="mi">32313723</span> <span class="mi">1</span><span class="n">f04a7c7</span> <span class="n">b5de947d</span>
+</pre></div>
+<p>Работая с ним в Erlang, нужно иметь в виду, что это не строка и не binary. Вот так не правильно:</p>
+<div class="codehilite"><pre>  <span class="nv">DeviceToken</span> <span class="o">=</span> <span class="s">&quot;8253de13 f71d310d 05a13135 e09e09b6 32c478d5 32313723 1f04a7c7 b5de947d&quot;</span>
+  <span class="nv">DeviceToken</span> <span class="o">=</span> <span class="s">&quot;8253de13f71d310d05a13135e09e09b632c478d5323137231f04a7c7b5de947d&quot;</span>
+  <span class="nv">DeviceToken</span> <span class="o">=</span> <span class="o">&lt;&lt;</span><span class="s">&quot;8253de13f71d310d05a13135e09e09b632c478d5323137231f04a7c7b5de947d&quot;</span><span class="o">&gt;&gt;</span>
+</pre></div>
+<p>Это 16-ти разрядное число. Вот так правильно:</p>
+<div class="codehilite"><pre> <span class="nv">DeviceToken</span> <span class="o">=</span> <span class="mi">16#8253de13f71d310d05a13135e09e09b632c478d5323137231f04a7c7b5de947d</span>
+</pre></div>
+
+<h2>feedback сервис</h2>
+<p>Все чутка сложнее, чем сперва казалось :) Бывает такое, что ваше приложение было удалено с девайса, а вы продолжаете присылать ему сообщения. Apple не очень хотят, чтобы APNs нагружали ненужными сообщениями, поэтому они настоятельно просят периодически обращаться к их <a href="http://developer.apple.com/library/mac/#documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CommunicatingWIthAPS/CommunicatingWIthAPS.html#//apple_ref/doc/uid/TP40008194-CH101-SW3">feedback сервису</a>, получать оттуда список таких девайсов, хранить список у себя и не посылать им сообщения.</p>
+<p>Эта функциональность тоже реализована в dp_push_sender.erl. Модуль опрашивает feedback сервис с заданной частотой и хранит токены в <a href="http://www.erlang.org/doc/man/dets.html">DETS</a>.</p>
+<p>Если немного подумать, то все еще немножко сложнее, чем сперва казалось :) Бывает такое, что после того, как ваше приложение было удалено с девайса, оно было опять на него установлено :) Поэтому должен быть способ удалить токен из DETS. И соответствующий метод предусмотрен в API библиотеки.</p>
+<p>У меня еще есть <a href="https://github.com/yzh44yzh/dp-push/blob/master/src/mock_feedback_service.erl">mock_feedback_service.erl</a>. Это заглушка, которая использовалась для отладки работы с feedback service. Ибо делать такую отладку, постоянно устанавливая и удаляя приложение с девайса очень уж неудобно.</p>
+
+<h2>Как подключить dp_push к проекту и как использовать</h2>
+<p>Подключаем как зависимость в rebar.config:</p>
+<div class="codehilite"><pre><span class="p">{</span><span class="n">deps</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">{</span><span class="n">dp_push</span><span class="p">,</span> <span class="s">&quot;.*&quot;</span><span class="p">,</span> <span class="p">{</span><span class="n">git</span><span class="p">,</span> <span class="s">&quot;https://github.com/yzh44yzh/dp-push.git&quot;</span><span class="p">,</span> <span class="s">&quot;v1.0&quot;</span><span class="p">}}</span>
+   <span class="p">]}.</span>
+</pre></div>
+<p>Запускаем приложение:</p>
+<div class="codehilite"><pre><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span>
+    <span class="nn">ssl</span><span class="p">:</span><span class="n">start</span><span class="p">(),</span>
+    <span class="nn">application</span><span class="p">:</span><span class="n">start</span><span class="p">(</span><span class="n">dp_push</span><span class="p">),</span>
+</pre></div>
+<p>И вызываем API методы:</p>
+<div class="codehilite"><pre><span class="nn">dp_push</span><span class="p">:</span><span class="nb">send</span><span class="p">(</span><span class="nv">Msg</span><span class="p">,</span> <span class="nv">DeviceToken</span><span class="p">),</span>
+</pre></div>
+
+<h2>Как можно dp_push развивать дальше</h2>
+<p>Запросы к APNs могут быть двух видов: <strong>simple</strong> и <strong>enchanced</strong>. На simple запросы сервис ничего не отвечает, а на enchanced отвечает. Можно принимать эти ответы и, например, как-то обрабатывать ошибки.</p>
+<p>Можно сделать dp_push не подключаемой библиотекой, а отдельным сервером (TCP и/или Web). В этом случае он может обслуживать сразу несколько приложений. Правда ему нужно будет иметь сертификаты для каждого приложения и выбирать нужный сертификат при отправке сообщения.</p>
+<p>Можно добавить сбор какой-нибудь статистики и средства мониторинга.</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
