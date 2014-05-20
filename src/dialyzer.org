@@ -1,0 +1,162 @@
+#+OPTIONS: ^:{}
+* Делаем Dialyzer чуть удобнее
+
+Я сторонник статической типизации. Дополнительные проверки со стороны
+компилятора, выявляющие некоторое подмножество ошибок, совсем не
+лишние. Плюс, код читать легче, точно зная, какие именно данные
+скрываются вот в этой переменной. Особенно если это чужой код :)
+
+К сожалению, Erlang не является статически типизированным языком.
+К счастью, *Dialyzer* устраняет этот недостаток :)
+
+Какое-то время назад я задался целью иметь в своем текущем проекте
+чистый, без ошибок, вывод от dialyzer. Это получилось, и ниже я опишу, как.
+
+Почему это важно? Примерно месяц dialyzer печалил меня одной
+надоедливой ошибкой. Dialyzer утверждал, что после фильтрации моих
+данных моей функцией на выходе всегда будет пустой список (да, он не
+только типы проверяет, он умеет больше).  Код выглядел правильным,
+проходил и автоматическое, и ручное тестирование.  Примерно раз в
+неделю я задавался целью разобраться с этой ошибкой, внимательно
+пересматривал код, и не находил проблем.  И вот, в очередной раз
+покопав код, я, наконец, увидел, что ошибка таки у меня есть. А
+dialyzer таки прав :)
+
+
+** warn_missing_spec
+
+Для начала было бы неплохо, чтобы все функции в проекте имели *spec*.
+
+В этом деле поможет недокументированная, но полезная опция компилятора
+*warn_missing_spec*.
+
+#+BEGIN_SRC Erlang
+{erl_opts, [debug_info,
+            bin_opt_info,
+            warn_missing_spec,
+            {parse_transform, lager_transform}]}.
+#+END_SRC
+
+С ней компилятор будет выдавать предупреждения, если *spec* отсутствует:
+
+#+BEGIN_SRC Shell-script
+yura ~/p/e_prof $ make
+rebar compile skip_deps=true
+==> e_prof (compile)
+src/e_prof.erl:33: Warning: missing specification for function add_action/2
+Compiled src/e_prof.erl
+#+END_SRC
+
+Добавить опцию не проблема, но потом начинаются нюансы :)
+
+У Rebar сборка инкрементальная, собирает только измененные
+модули. Поэтому предупреждения missing spec для всего проекта не видны, а
+видны только для измененных модулей. Интуитивно хотелось бы иного --
+получить сообщения для всего проекта. Для этого приходится делать
+*rebar clean*. Пока все *spec* не прописаны, это мешает. Но
+после того, как проект приведен в порядок, инкрементальная сборка
+не мешает счастью :)
+
+Но самая большая беда -- это модули типа *gen_server* и
+*supervisor*. Опция потребует, чтобы у всех ваших gen_server и
+supervisor для всех callback был написан spec. А dialyzer потребует,
+чтобы этот spec был не абы-какой, а строго соответствующий
+*behaviour*. А прописать все эти длинные много-строчные спеки для всех
+callback для всех gen_server и supervisor в проекте, это явно не то,
+что хочется делать :(
+
+Ну ладно, пусть будут спеки, но короткие, в одну строку.
+Сделал хедер-файл с более лаконичными псевдонимами для нужных типов:
+#+BEGIN_SRC Erlang
+-type(gs_call_reply() ::
+    {reply, gs_reply(), gs_state()} |
+    {reply, gs_reply(), gs_state(), timeout() | hibernate} |
+    {noreply, gs_state()} |
+    {noreply, gs_state(), timeout() | hibernate} |
+    {stop, gs_reason(), gs_reply(), gs_state()} |
+    {stop, gs_reason(), gs_state()}).
+#+END_SRC
+подробнее:
+https://github.com/yzh44yzh/erl-proj-tpl/blob/master/include/otp_types.hrl
+
+И с ним спеки в gen_server модулях стали выглядеть прилично:
+#+BEGIN_SRC Erlang
+-spec(handle_call(gs_request(), gs_from(), gs_reply()) -> gs_call_reply()).
+handle_call({some, _Data}, _From, State) ->
+#+END_SRC
+подробнее:
+https://github.com/yzh44yzh/erl-proj-tpl/blob/master/src/some_worker.erl
+
+И теперь покрыть все gen_server модули спеками стало проще.
+
+Правда остался еще один нюанс -- опция *warn_missing_spec* хочет, чтобы
+в юнит-тестах тоже были спеки. А там они не особо нужны.
+С этим нюансом я не стал заморачиваться :)
+
+
+** Unknown functions
+
+Dialyzer умеет находить вызовы несуществующих функций. Это, конечно, хорошо.
+Но некоторые unknown functions не хотелось бы видеть. Это функции из стандартных
+библиотек и из библиотек третьих сторон.
+
+В принципе, можно было бы все стандартные либы добавить в *Persistent Lookup Table*.
+И весь код в *deps* добавить в путь dialyzer
+
+#+BEGIN_SRC Erlang
+dialyzer --src \
+-I include -I deps/lib1/include -I deps/lib2/include \
+-r src -r deps/lib1/src -r deps/lib2/src
+#+END_SRC
+
+Но тогда проверка будет идти слишком долго. Я предпочитаю проверять только свой код,
+и даже это не особо быстро. Тогда в выводе будут unknown functions:
+
+#+BEGIN_SRC Shell-script
+yura ~/p/e_prof $ dialyzer --src -I include -r src
+  Checking whether the PLT /home/yura/.dialyzer_plt is up-to-date... yes
+  Proceeding with analysis...
+Unknown functions:
+  erlang:atom_to_list/1
+  erlang:get_module_info/1
+  erlang:get_module_info/2
+  erlang:integer_to_list/1
+  erlang:time/0
+  lager:error/2
+  lager:start/0
+ done in 0m0.74s
+done (passed successfully)
+#+END_SRC
+
+В рабочем проекте их штук 20, а может и больше. Это плохо, потому что
+там могут затеряться вызовы функций, которые действительно
+важны. После рефакторинга приходится внимательно просматривать этот
+список, чтобы не пропустить обращения к переименованным функциям по
+старым именам. Хотелось бы видеть только те unknown functions, которые
+относятся к моему коду.
+
+Ну что ж, это реализуемо. Нужно просто отфильтровать вывод dialyzer
+с помощью *grep*, исключив те сообщения, которые меня не интересуют.
+
+Все такие сообщения кладем в файлик *.dialyzer.ignore* (ну или
+назовите его как хотите), и фильтруем:
+
+#+BEGIN_SRC Shell-script
+dialyzer --src -I include -r src /
+| fgrep --invert-match --file .dialyzer.ignore
+#+END_SRC
+
+Теперь вывод как надо:
+
+#+BEGIN_SRC Shell-script
+yura ~/p/e_prof $ make d
+dialyzer --src -I include src \
+	| fgrep --invert-match --file .dialyzer.ignore
+  Checking whether the PLT /home/yura/.dialyzer_plt is up-to-date... yes
+  Proceeding with analysis...
+Unknown functions:
+ done in 0m0.73s
+done (passed successfully)
+#+END_SRC
+
+Вот теперь жизнь с dialyzer стала заметно лучше :)

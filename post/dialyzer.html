@@ -1,0 +1,256 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Делаем Dialyzer чуть удобнее</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>Делаем Dialyzer чуть удобнее</h1>
+
+<p>
+Я сторонник статической типизации. Дополнительные проверки со стороны
+компилятора, выявляющие некоторое подмножество ошибок, совсем не
+лишние. Плюс, код читать легче, точно зная, какие именно данные
+скрываются вот в этой переменной. Особенно если это чужой код :)
+</p>
+
+<p>
+К сожалению, Erlang не является статически типизированным языком.
+К счастью, <b>Dialyzer</b> устраняет этот недостаток :)
+</p>
+
+<p>
+Какое-то время назад я задался целью иметь в своем текущем проекте
+чистый, без ошибок, вывод от dialyzer. Это получилось, и ниже я опишу, как.
+</p>
+
+<p>
+Почему это важно? Примерно месяц dialyzer печалил меня одной
+надоедливой ошибкой. Dialyzer утверждал, что после фильтрации моих
+данных моей функцией на выходе всегда будет пустой список (да, он не
+только типы проверяет, он умеет больше).  Код выглядел правильным,
+проходил и автоматическое, и ручное тестирование.  Примерно раз в
+неделю я задавался целью разобраться с этой ошибкой, внимательно
+пересматривал код, и не находил проблем.  И вот, в очередной раз
+покопав код, я, наконец, увидел, что ошибка таки у меня есть. А
+dialyzer таки прав :)
+</p>
+
+
+<h3>warn_missing_spec</h3>
+
+<p>
+Для начала было бы неплохо, чтобы все функции в проекте имели <b>spec</b>.
+</p>
+
+<p>
+В этом деле поможет недокументированная, но полезная опция компилятора
+<b>warn_missing_spec</b>.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">{erl_opts, [debug_info,
+            bin_opt_info,
+            warn_missing_spec,
+            {parse_transform, lager_transform}]}.
+</pre>
+</div>
+
+<p>
+С ней компилятор будет выдавать предупреждения, если <b>spec</b> отсутствует:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Shell-script">yura ~/p/e_prof $ make
+rebar compile skip_deps=true
+==&gt; e_prof (compile)
+src/e_prof.erl:33: Warning: missing specification for function add_action/2
+Compiled src/e_prof.erl
+</pre>
+</div>
+
+<p>
+Добавить опцию не проблема, но потом начинаются нюансы :)
+</p>
+
+<p>
+У Rebar сборка инкрементальная, собирает только измененные
+модули. Поэтому предупреждения missing spec для всего проекта не видны, а
+видны только для измененных модулей. Интуитивно хотелось бы иного &#x2013;
+получить сообщения для всего проекта. Для этого приходится делать
+<b>rebar clean</b>. Пока все <b>spec</b> не прописаны, это мешает. Но
+после того, как проект приведен в порядок, инкрементальная сборка
+не мешает счастью :)
+</p>
+
+<p>
+Но самая большая беда &#x2013; это модули типа <b>gen_server</b> и
+<b>supervisor</b>. Опция потребует, чтобы у всех ваших gen_server и
+supervisor для всех callback был написан spec. А dialyzer потребует,
+чтобы этот spec был не абы-какой, а строго соответствующий
+<b>behaviour</b>. А прописать все эти длинные много-строчные спеки для всех
+callback для всех gen_server и supervisor в проекте, это явно не то,
+что хочется делать :(
+</p>
+
+<p>
+Ну ладно, пусть будут спеки, но короткие, в одну строку.
+Сделал хедер-файл с более лаконичными псевдонимами для нужных типов:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">-type(gs_call_reply() ::
+    {reply, gs_reply(), gs_state()} |
+    {reply, gs_reply(), gs_state(), timeout() | hibernate} |
+    {noreply, gs_state()} |
+    {noreply, gs_state(), timeout() | hibernate} |
+    {stop, gs_reason(), gs_reply(), gs_state()} |
+    {stop, gs_reason(), gs_state()}).
+</pre>
+</div>
+<p>
+подробнее:
+<a href="https://github.com/yzh44yzh/erl-proj-tpl/blob/master/include/otp_types.hrl">https://github.com/yzh44yzh/erl-proj-tpl/blob/master/include/otp_types.hrl</a>
+</p>
+
+<p>
+И с ним спеки в gen_server модулях стали выглядеть прилично:
+</p>
+<div class="org-src-container">
+<pre class="src src-Erlang">-spec(handle_call(gs_request(), gs_from(), gs_reply()) -&gt; gs_call_reply()).
+handle_call({some, _Data}, _From, State) -&gt;
+</pre>
+</div>
+<p>
+подробнее:
+<a href="https://github.com/yzh44yzh/erl-proj-tpl/blob/master/src/some_worker.erl">https://github.com/yzh44yzh/erl-proj-tpl/blob/master/src/some_worker.erl</a>
+</p>
+
+<p>
+И теперь покрыть все gen_server модули спеками стало проще.
+</p>
+
+<p>
+Правда остался еще один нюанс &#x2013; опция <b>warn_missing_spec</b> хочет, чтобы
+в юнит-тестах тоже были спеки. А там они не особо нужны.
+С этим нюансом я не стал заморачиваться :)
+</p>
+
+<h3> Unknown functions</h3>
+
+<p>
+Dialyzer умеет находить вызовы несуществующих функций. Это, конечно, хорошо.
+Но некоторые unknown functions не хотелось бы видеть. Это функции из стандартных
+библиотек и из библиотек третьих сторон.
+</p>
+
+<p>
+В принципе, можно было бы все стандартные либы добавить в <b>Persistent Lookup Table</b>.
+И весь код в <b>deps</b> добавить в путь dialyzer
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">dialyzer --src \
+-I include -I deps/lib1/include -I deps/lib2/include \
+-r src -r deps/lib1/src -r deps/lib2/src
+</pre>
+</div>
+
+<p>
+Но тогда проверка будет идти слишком долго. Я предпочитаю проверять только свой код,
+и даже это не особо быстро. Тогда в выводе будут unknown functions:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Shell-script">yura ~/p/e_prof $ dialyzer --src -I include -r src
+  Checking whether the PLT /home/yura/.dialyzer_plt is up-to-date... yes
+  Proceeding with analysis...
+Unknown functions:
+  erlang:atom_to_list/1
+  erlang:get_module_info/1
+  erlang:get_module_info/2
+  erlang:integer_to_list/1
+  erlang:time/0
+  lager:error/2
+  lager:start/0
+ done in 0m0.74s
+done (passed successfully)
+</pre>
+</div>
+
+<p>
+В рабочем проекте их штук 20, а может и больше. Это плохо, потому что
+там могут затеряться вызовы функций, которые действительно
+важны. После рефакторинга приходится внимательно просматривать этот
+список, чтобы не пропустить обращения к переименованным функциям по
+старым именам. Хотелось бы видеть только те unknown functions, которые
+относятся к моему коду.
+</p>
+
+<p>
+Ну что ж, это реализуемо. Нужно просто отфильтровать вывод dialyzer
+с помощью <b>grep</b>, исключив те сообщения, которые меня не интересуют.
+</p>
+
+<p>
+Все такие сообщения кладем в файлик <b>.dialyzer.ignore</b> (ну или
+назовите его как хотите), и фильтруем:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Shell-script">dialyzer --src -I include -r src /
+| fgrep --invert-match --file .dialyzer.ignore
+</pre>
+</div>
+
+<p>
+Теперь вывод как надо:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Shell-script">yura ~/p/e_prof $ make d
+dialyzer --src -I include src \
+    | fgrep --invert-match --file .dialyzer.ignore
+  Checking whether the PLT /home/yura/.dialyzer_plt is up-to-date... yes
+  Proceeding with analysis...
+Unknown functions:
+ done in 0m0.73s
+done (passed successfully)
+</pre>
+</div>
+
+<p>
+Вот теперь жизнь с dialyzer стала заметно лучше :)
+</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
