@@ -1,0 +1,243 @@
+* gen_server -- сервер внутри сервера
+
+Доклад для 1-й встречи Belarus Erlang User Group
+
+21 июня 2014
+
+*gen_server* хорошо известный и активно используемый паттерн.
+С другой стороны, он требует некоторых усилий для понимания.
+
+Хороший подход к изучению gen_server -- написать его самому.
+Такой подход выбрал и Joe Armstrong ([[http://pragprog.com/book/jaerlang2/programming-erlang][Programming Erlang, глава 16]]), и
+Fred Hebert ([[http://learnyousomeerlang.com/what-is-otp#its-the-open-telecom-platform][LYSE, глава What is OTP?]]).
+
+Способ эффективный, но я в своем докладе не буду его повторять.
+Вы, наверняка, это читали. Ну а если не читали, то завтра же прочитаете :)
+Я лучше покопаюсь во внутренностях gen_server и расскажу о некоторых
+нюансах его использования.
+
+
+* внутренности gen_server
+
+TODO
+- общая схема, векторный рисунок, вставить в презентацию и в пост
+- 4 более подробные схемы
+
+TODO куда-то в пост нужно будет вставить линк на доку
+http://www.erlang.org/doc/man/gen_server.html
+
+** схема gen_server
+
+   |                   | my_module.erl | gen_server.erl |
+   |-------------------+---------------+----------------|
+   | caller thread     | public api    | ?              |
+   |-------------------+---------------+----------------|
+   | gen_server thread | handle_*      | ?              |
+   |-------------------+---------------+----------------|
+
+** Публичный АПИ my_module.erl
+start_link
+{local,Name}
+{global,Name}
+Options:
+{timeout, Time}
+{debug, Dbgs}
+{spawn_opt,SOpts}
+http://www.erlang.org/doc/man/erlang.html#spawn_opt-2
+
+get_stuff
+
+add_stuff
+
+
+gen_server:start_link для запуска под superviser
+gen_server:start для запуска из консоли для теста (нет связи процесса консоли и процессом сервера,
+и консоль не упадет, если упадет сервер).
+
+** gen_server behaviour
+
+*** init
+init блокирует caller, не застревать в нем, тяжелую инициализацию делать отложено
+ну это общеизвестно, во всех книгах написано
+
+Отложенную инициализацию можно сделать так:
+self() ! init
+handle_info(init)
+или
+{ok, State, Timeout}
+handle_info(timeout)
+
+про изначальный смыл Timeout и про hibernate будет ниже
+
+
+*** handle_call
+8 вариантов ответа :)
+3 reply (обычный, с timeout, hibernate)
+3 noreply (обычный, с timeout, hibernate)
+2 stop (с Reply и без Reply)
+
+варианты noreply и вариант stop без Reply требуют
+gen_server:reply/2, From = {Pid, Ref}
+иначе вызов gen_server:call завершится без ответа по timeout
+
+если мы хотим ответить быстро, а сообщение будем обрабатывать долго, и потому нужно ответить
+после получения сообщения, но до его обработки
+
+
+*** handle_cast
+4 варианта ответа
+3 noreply (обычный, с timeout, hibernate)
+stop
+
+
+*** handle_info
+если мы мониторим что-то, то будем получать EXIT сигналы
+
+те же 4 варианта ответа
+
+
+*** terminate
+если был ответ stop в одном из handle_*
+
+нормальные причины: normal, shutdown, {shutdown, Term}
+все другие OTP рассматривает как ошибку и логирует
+
+shutdown -- если gen_server останавливается из-за остановки своего супервизора
+и у него стоит флаг trap exit
+и shutdown стратегия супервизона не brutal_kill.
+
+
+*** code_change
+Это надо рассматривать в теме релизов. Пропускаю.
+
+
+*** format_status
+Имеет дефолтную реализацию, используется для формирования сообщения об ошибке при падении процесса.
+crash report
+Можно сделать свою реализацию, если хочется показать State как-то более информативно.
+
+
+** gen_server, поток клиента
+Basic Abstraction Libraries: sys, proc_lib
+stdlib app
+
+http://www.erlang.org/doc/man/sys.html
+A Functional Interface to System Messages
+The sys module can be used for debugging a gen_server.
+
+TODO: попробовать все это
+9> sys:statistics(code_lock, false).
+10> sys:trace(code_lock, false).
+11> sys:get_status(code_lock).
+
+http://www.erlang.org/doc/man/proc_lib.html
+Functions for asynchronous and synchronous start of processes adhering to the OTP design principles.
+
+При старте процесса запоминает инфу: pid, зарегистрированное имя, все
+родительские процессы, начальная функция. При падении процесса инфа используется
+для формирования crash report.
+Позволяет задать ряд настроек: приоритет, heap size, сборка мусора.
+К нормальным причинам завершения процесса добавляет shutdown, {shutdown, Term}
+
+gen_server:enter_loop
+
+
+** gen_server, поток сервера
+loop, state
+
+
+* timeout и hibernate
+init, handle_call, handle_cast, handle_info могут вернуть Timeout или hibernate
+
+{ok, State, hibernate}
+отбрасывает стек, проводит сборку мусора, дефрагментирует heap
+в итоге процесс занимает меньше памяти
+имеет смысл, если процесс редко получает сообщения,
+и много времени проводит ничего не делая, в ожидании
+
+А в чем изначальный смысл этого {ok, State, Timeout}?
+If an integer timeout value is provided, a timeout will occur unless a
+request or a message is received within Timeout milliseconds.
+Видимо, чтобы обрабатывать ситуацию, когда долго не приходят сообщения.
+Можно в hibernate уйти по этому поводу.
+
+
+* отладка с помощью модуля sys
+http://www.erlang.org/doc/design_principles/spec_proc.html
+http://www.erlang.org/doc/man/sys.html
+
+
+* что в gen_server можно сократить?
+TODO
+наверняка есть какой-то overhead, который можно убрать, и что-то выйграть
+
+TODO
+
+Loïc Hoguin
+
+Founder of the Nine Nines open source Erlang company. Main author of the Cowboy, Bullet, Sheriff and Farwest projects. Spawnfest co-founder and organizer.
+
+Beyond OTP
+http://www.erlang-factory.com/conference/ErlangUserConference2013/speakers/LoicHoguin
+
+они в cowboy заменили gen_server, выйграли на чем-то 20% производительности
+TODO найти этот момент на видео доклада, посмотреть
+TODO посмотреть, где в ковбое proc_lib, и за счет чего они там выйграли
+
+Если вы хоже хотите что-то выжать по производительности, и для этого
+сделать свою реализацию вместо gen_server, gen_fsm, gen_event и т.д.
+но так, чтобы она была полноценным участником OTP приложения,
+читайте доку:
+http://www.erlang.org/doc/design_principles/spec_proc.html
+
+Там не так уж и сложно. Все толково описано, и есть хороший пример реализации.
+
+be started in a way that makes the process fit into a supervision tree,
+support the sys debug facilities, and
+take care of system messages.
+
+proc_lib для старта процесса
+
+исползовать sys для отладки
+
+System messages are messages with special meaning, used in the
+supervision tree. Typical system messages are requests for trace
+output, and requests to suspend or resume process execution (used
+during release handling). Processes implemented using standard
+behaviours automatically understand these messages.
+
+* Нюансы использования
+
+Для все handle_ последний клоз должен быть catch-all, пишуший в логи ошибку
+TODO иначе процесс упадет с badmatch? Проверить. Должен падать.
+
+Из презентации Лебедевича:
+- не падать в init :), такие падения не дают стартовать приложению и сложны в отладке (непонятный лог)
+  TODO: воспроизвести ситуацию, дать пример такого лога
+- timeout = infinity, трудно диагносцируемый deadlock,
+  лучше ставить конкретное число, тогда deadlock себя проявит
+  ну или не указывать, пусть будут дефолтные 5 сек
+
+handle_* должны иметь последний клоз catch all и логировать все неизвестные запросы как ошибку
+
+gen_server и dialyzer, написание spec для handle_*
+
+отправка сообщений и handle_info работают быстрее, чем gen_server:call/cast
+если мы жутко все оптимизируем и экономим на спичках, можно попробовать это.
+
+If it is necessary to clean up before termination, the shutdown
+strategy must be a timeout value and the gen_server must be set to
+trap exit signals in the init function. When ordered to shutdown, the
+gen_server will then call the callback function terminate(shutdown,
+State):
+init(Args) ->
+    ...,
+    process_flag(trap_exit, true),
+    ...,
+    {ok, State}.
+
+...
+
+terminate(shutdown, State) ->
+    ..code for cleaning up here..
+    ok.
