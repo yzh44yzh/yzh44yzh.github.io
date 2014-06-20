@@ -19,7 +19,24 @@ Fred Hebert ([[http://learnyousomeerlang.com/what-is-otp#its-the-open-telecom-pl
 
 * внутренности gen_server
 
-Ну и с места в карьер, посмотрим, как выполняется инициализация gen_server.
+*gen_server* является базовым паттерном OTP, потому что все остальные: supervisor,
+gen_event, gen_fsm -- реализованы аналогично, но узко специализированны.
+
+Мы загляен в код приложения *stdlib*, которое на моем компьютере находится здесь:
+/usr/local/lib/erlang/lib/stdlib-1.19.4
+(а на вашем я не знаю, где :)
+
+Нас будут интересовать модули:
+[[http://www.erlang.org/doc/man/proc_lib.html][proc_lib]], [[http://www.erlang.org/doc/man/sys.html][sys]] и gen.
+
+*proc_lib* предлагает функции обертки над стандартными функциями старта процессов
+*erlang:spawn*, *erlang:spawn_link*, *erlang:spawn_opt*, где совершаются дополнительные
+действия над процессами, чтобы вписать их в инфраструктуру OTP.
+
+*sys* используется для отладки OTP-процессов.
+
+*gen* (недокументированный) содержит общий код для gen_server, gen_fsm, gen_event и supervisor.
+
 
 ** gen_server:start_link(...)
 
@@ -28,7 +45,7 @@ Fred Hebert ([[http://learnyousomeerlang.com/what-is-otp#its-the-open-telecom-pl
 На этой схеме и последующих:
  -  Левые квадраты, верхний и нижний -- это callback-модуль, написанный программистом.
  -  Правые квадраты, верхний и нижний -- это код OTP фреймворка (модули gen_server, gen, proc_lib).
- -  Верхние квадраты, правый и левый -- это код, который выполняется в потоке клиента.
+ -  Верхние квадраты, правый и левый -- это код, который выполняется в потоке клиента (или родителя).
  -  Нижние квадраты, правый и левый -- это код, который выполняется в потоке сервера.
 
 Начинаем отсюда:
@@ -45,18 +62,18 @@ start_link() ->
 Дальше вызывается *proc_lib:spawn_opt(...)*
 где определяется родительский процесс и все его предки,
 вызывается *erlang:spawn_opt(...)*, который и создает новый серверный процесс.
-После чего клиентский процесс вызывает *sync_wait(...)*,
-блокируется в *receive* с заданным timeout и ждет сообщение *ack* от сервереного процесса.
+После чего родительский процесс вызывает *proc_lib:sync_wait(...)*,
+блокируется в *receive* с заданным timeout и ждет сообщение *ack* от серверного процесса.
 
 Серверный процесс либо пришлет подтверждение, что он создан и у него все ок *{ack, Pid, Return}*,
 либо упадет при инициализации *{'EXIT', Pid, Reason}*, либо ничего не придет до истечения timeout.
 В последнем случае серверный процесс убивается, и возвращается ошибка.
 
 Тем временем жизнь серверного процесса начинается с *gen_server:init_it(...)*.
-Здесь настраиваются параменты отладки из агрумента *Options*, если есть,
+Здесь настраиваются параметры отладки из агрумента *Options*, если есть,
 и от *sys:debug_options(...)*.
 
-Затем вызывается *init* нашего callback-модуля, где мы вольны инициализировать сервеный
+Затем вызывается *init* нашего callback-модуля, где мы вольны инициализировать серверный
 процесс как нам угодно. Например, может создать для него структуру данных, хранящее состояние
 и вернуть ее *{ok, State}*.
 
@@ -141,10 +158,7 @@ gen_server:cast(Name, Request) ->
 нашего модуля.
 
 
-** Нюансы
-
-Это было в общих чертах. Дальше всякие нюансы :)
-
+** Некоторые нюансы о callback-функциях
 
 *** start_link
 
@@ -196,7 +210,7 @@ handle_info(timeout, State) ->
 #+END_SRC
 
 
-Про изначальный смыл {ok, State, Timeout} будет ниже.
+Про изначальный смыл *{ok, State, Timeout}* будет ниже.
 
 А еще очень нежелательно в *init* крашится :) Такой краш обычно проявляется на старте приложения,
 а старт приложения обычно происходит на старте узла. Так что при этом весь узел падает, и с не
@@ -205,175 +219,261 @@ handle_info(timeout, State) ->
 
 *** handle_call
 
-TODO
+*handle_call* имеет 8 вариантов ответа.
 
-8 вариантов ответа :)
-3 reply (обычный, с timeout, hibernate)
-3 noreply (обычный, с timeout, hibernate)
-2 stop (с Reply и без Reply)
+3 *reply*:
+ - {reply, Reply, NewState}
+ - {reply, Reply, NewState, Timeout}
+ - {reply, Reply, NewState, hibernate}
 
-варианты noreply и вариант stop без Reply требуют
-gen_server:reply/2, From = {Pid, Ref}
-иначе вызов gen_server:call завершится без ответа по timeout
+3 *noreply*:
+ - {noreply, NewState}
+ - {noreply, NewState, Timeout}
+ - {noreply, NewState, hibernate}
 
-если мы хотим ответить быстро, а сообщение будем обрабатывать долго, и потому нужно ответить
-после получения сообщения, но до его обработки
+2 *stop*:
+ - {stop, Reason, Reply, NewState}
+ - {stop, Reason, NewState}
 
+Про Timeout и hibernate будет ниже, reply и stop понятны. noreply нужно объяснить.
 
-*** handle_cast
-4 варианта ответа
-3 noreply (обычный, с timeout, hibernate)
-stop
+Клиент в любом случае должен получить ответ на вызов gen_server:call. Если мы ответ не пошлем,
+то клиентский процесс упадет.
 
-
-*** handle_info
-если мы мониторим что-то, то будем получать EXIT сигналы
-
-те же 4 варианта ответа
-
-
-*** terminate
-если был ответ stop в одном из handle_*
-
-нормальные причины: normal, shutdown, {shutdown, Term}
-все другие OTP рассматривает как ошибку и логирует
-
-shutdown -- если gen_server останавливается из-за остановки своего супервизора
-и у него стоит флаг trap exit
-и shutdown стратегия супервизона не brutal_kill.
+Другое дело, что ответ мы можем послать раньше, чем полностью отработает весь код в handle_call.
+Например, если обработка запроса займет некоторое время, и мы не хотим блокировать клиента на
+все это время, то мы можем дать ответ раньше, вызовом *gen_server:reply(From, Reply)*. Затем
+выполнить обработку, затем вернуть *noreply* или *stop* без Reply.
 
 
-*** code_change
-Это надо рассматривать в теме релизов. Пропускаю.
+*** handle_cast и handle_info
+
+handle_cast и handle_info имеют 4 варианта ответа:
+ - {noreply, NewState}
+ - {noreply, NewState, Timeout}
+ - {noreply, NewState, hibernate}
+ - {stop, Reason, NewState}
+
+Тоже самое, что и handle_call, только отвечать клиенту не нужно.
 
 
 *** format_status
-Имеет дефолтную реализацию, используется для формирования сообщения об ошибке при падении процесса.
-crash report
-Можно сделать свою реализацию, если хочется показать State как-то более информативно.
 
+Необязательный callback, который редко определяют, потому что они
+имеет реализацию по умолчанию, подходящую для большинства случаев.
 
-** gen_server, поток клиента
-Basic Abstraction Libraries: sys, proc_lib
-stdlib app
+Этот callback используется для формирования crash report -- сообщения
+об ошибке при падении процесса.  Там собирается информация о процессе,
+его родителях, инфа из *sys:get_debug* и, конечно, состояние процесса.
 
-http://www.erlang.org/doc/man/sys.html
-A Functional Interface to System Messages
-The sys module can be used for debugging a gen_server.
+Так вот, это состояние может быть большой и сложной структурой, которую
+всю целиком выводить в лог не хочется. Тогда можно сделать свою реализацию,
+которая покажет состояние как-нибудь более компактно и информативно.
 
-TODO: попробовать все это
-9> sys:statistics(code_lock, false).
-10> sys:trace(code_lock, false).
-11> sys:get_status(code_lock).
-
-http://www.erlang.org/doc/man/proc_lib.html
-Functions for asynchronous and synchronous start of processes adhering to the OTP design principles.
-
-При старте процесса запоминает инфу: pid, зарегистрированное имя, все
-родительские процессы, начальная функция. При падении процесса инфа используется
-для формирования crash report.
-Позволяет задать ряд настроек: приоритет, heap size, сборка мусора.
-К нормальным причинам завершения процесса добавляет shutdown, {shutdown, Term}
-
-gen_server:enter_loop
-
-
-** gen_server, поток сервера
-loop, state
+Вместо
+#+BEGIN_SRC Erlang
+[{data, [{"State", State}]}],
+#+END_SRC
+сделать
+#+BEGIN_SRC Erlang
+[{data, [{"State", get_important_part_of(State)}]},
+#+END_SRC
 
 
 * timeout и hibernate
-init, handle_call, handle_cast, handle_info могут вернуть Timeout или hibernate
 
-{ok, State, hibernate}
-отбрасывает стек, проводит сборку мусора, дефрагментирует heap
-в итоге процесс занимает меньше памяти
-имеет смысл, если процесс редко получает сообщения,
-и много времени проводит ничего не делая, в ожидании
+*init*, *handle_call*, *handle_cast* и *handle_info* могут вернуть Timeout или hibernate.
 
-А в чем изначальный смысл этого {ok, State, Timeout}?
-If an integer timeout value is provided, a timeout will occur unless a
-request or a message is received within Timeout milliseconds.
-Видимо, чтобы обрабатывать ситуацию, когда долго не приходят сообщения.
-Можно в hibernate уйти по этому поводу.
+Если задан Timeout, и в течение этого Timeout gen_server не получает никаких сообщений,
+то он сам себе генерирует сообщение *timeout*, и его можно обработать в *handle_info*.
+Например, можно сделать так, что если сервер 5 минут не получает никаких сообщений,
+то он отравляется в hibernate.
+
+Ну а если сообщения поступают раньше, то они отменяют Timeout. А повторно его можно
+установить (или не устанавливать) по результатам обработки сообщений в соответствующем
+*handle_call/handle_cast*.
+
+#+BEGIN_SRC Erlang
+init(Args) ->
+    State = ...,
+    {ok, State, 5 * 60 * 1000}.
+
+handle_info(timeout, State) ->
+    io:format("~p no messages from clients, hibernate", [?MODULE]),
+    {noreply, State, hibernate}.
+#+END_SRC
+
+
+[[http://www.erlang.org/doc/man/erlang.html#hibernate-3][hibernate]] -- это особое состояние процесса, в котором он занимает минимум памяти.
+При этом отбрасывается стек, проводится сборка мусора, дефрагментируется heap.
+
+Как только процесс получает сообщение, он выходит из hibernate и обрабатывает его.
+Однако вход в hibernate требует времени, и явно не стоит им злоупотреблять.
+Этот режим имеет смысл, если процесс редко получает сообщения,
+а большую часть времени проводит в ожидании, ничего не делая.
 
 
 * отладка с помощью модуля sys
-http://www.erlang.org/doc/design_principles/spec_proc.html
-http://www.erlang.org/doc/man/sys.html
+
+*gen_server* и другие OTP модули уже имеет встроенные средства отладки.
+
+Посмотрим некоторые функции модуля [[http://www.erlang.org/doc/man/sys.html][sys]].
+
+*sys:trace(Name, Flag)* позволяет включить-выключить вывод в консоль всех сообщений, которые
+проходят через *gen_server*:
+
+#+BEGIN_SRC Erlang
+> sys:trace(e_prof, true).
+ok
+> e_prof:add_action("some", 5).
+*DBG* e_prof got cast {add_action,"some",5}
+*DBG* e_prof new state {state,[{action_accum,[115,111,109,101],[5]}],[{action_stat_set,{16,15,4},[]},{action_stat_set,{16,14,4},[]},{action_stat_set,{16,13,4},[]},{action_stat_set,{16,12,4},[]},{action_stat_set,{16,11,4},[]}]}
+ok
+> e_prof:add_action("some", 15).
+*DBG* e_prof got cast {add_action,"some",15}
+*DBG* e_prof new state {state,[{action_accum,[115,111,109,101],[15,5]}],[{action_stat_set,{16,15,4},[]},{action_stat_set,{16,14,4},[]},{action_stat_set,{16,13,4},[]},{action_stat_set,{16,12,4},[]},{action_stat_set,{16,11,4},[]}]}
+ok
+> sys:trace(e_prof, false).
+ok
+#+END_SRC
 
 
-* что в gen_server можно сократить?
-TODO
-наверняка есть какой-то overhead, который можно убрать, и что-то выйграть
+*sys:statistics(Name, Flag)* собирает и показывает статистику работы серверного процесса:
 
-TODO
+#+BEGIN_SRC Erlang
+> sys:statistics(e_prof, true).
+ok
+> sys:statistics(e_prof, get).
+{ok,[{start_time,{{2014,6,18},{16,14,43}}},
+     {current_time,{{2014,6,18},{16,17,10}}},
+     {reductions,360},
+     {messages_in,5},
+     {messages_out,0}]}
+> sys:statistics(e_prof, false).
+ok
+#+END_SRC
 
-Loïc Hoguin
 
-Founder of the Nine Nines open source Erlang company. Main author of the Cowboy, Bullet, Sheriff and Farwest projects. Spawnfest co-founder and organizer.
+*sys:get_state(Name) -> State* позволяет получить состояние процесса:
 
-Beyond OTP
-http://www.erlang-factory.com/conference/ErlangUserConference2013/speakers/LoicHoguin
+#+BEGIN_SRC Erlang
+> sys:get_state(e_prof).
+{state,[],
+       [{action_stat_set,{16,21,4},[]},
+        {action_stat_set,{16,20,4},[]},
+        {action_stat_set,{16,19,4},[]},
+        {action_stat_set,{16,18,4},[]},
+        {action_stat_set,{16,17,4},[]}]}
+#+END_SRC
 
-они в cowboy заменили gen_server, выйграли на чем-то 20% производительности
-TODO найти этот момент на видео доклада, посмотреть
-TODO посмотреть, где в ковбое proc_lib, и за счет чего они там выйграли
 
-Если вы хоже хотите что-то выжать по производительности, и для этого
-сделать свою реализацию вместо gen_server, gen_fsm, gen_event и т.д.
-но так, чтобы она была полноценным участником OTP приложения,
-читайте доку:
-http://www.erlang.org/doc/design_principles/spec_proc.html
+*sys:get_status(Name) -> Status* дает еще больше инфы о процессе:
 
-Там не так уж и сложно. Все толково описано, и есть хороший пример реализации.
+#+BEGIN_SRC Erlang
+> sys:get_status(e_prof).
+{status,<0.136.0>,
+        {module,gen_server},
+        [[{'$ancestors',[e_prof_sup,<0.134.0>]},
+          {'$initial_call',{e_prof,init,1}}],
+         running,<0.135.0>,
+         [{statistics,{{{2014,6,18},{16,14,43}},
+                       {reductions,3590},
+                       4,0}}],
+         [{header,"Status for generic server e_prof"},
+          {data,[{"Status",running},
+                 {"Parent",<0.135.0>},
+                 {"Logged events",[]}]},
+          {data,[{"State",
+                  {state,[],
+                         [{action_stat_set,{16,16,4},
+                                           [{action_stat,"some",10.0,15,...}]},
+                          {action_stat_set,{16,15,4},[]},
+                          {action_stat_set,{16,14,4},[]},
+                          {action_stat_set,{16,13,4},[]},
+                          {action_stat_set,{16,12,...},[]}]}}]}]]}
+#+END_SRC
 
-be started in a way that makes the process fit into a supervision tree,
-support the sys debug facilities, and
-take care of system messages.
+Очевидно, что эта отладка дает некоторый оверхед.
+Но все сделано по уму -- отладка включается и выключается.
 
-proc_lib для старта процесса
 
-исползовать sys для отладки
+* Оптимизация производительности
 
-System messages are messages with special meaning, used in the
-supervision tree. Typical system messages are requests for trace
-output, and requests to suspend or resume process execution (used
-during release handling). Processes implemented using standard
-behaviours automatically understand these messages.
+Ну а теперь подходим к самому интересному. Мы ведь полезли во
+внутренности OTP не просто так, а чтобы поискать, где можно выжать
+больше производительности. Всем нам хочется узнать, где и как можно похачить
+реализацию gen_server, чтобы работало быстрее :)
 
-* Нюансы использования
+Понятное дело, что разработчики уже ходили этим путем. Например, этим занимался
+Луик Хоген (Loïc Hoguin), основатель компании *99s* и автор *Cowboy*.
 
-Для все handle_ последний клоз должен быть catch-all, пишуший в логи ошибку
-TODO иначе процесс упадет с badmatch? Проверить. Должен падать.
+Есть его выступление на Erlang Factory 2013
+[[http://www.erlang-factory.com/conference/ErlangUserConference2013/speakers/LoicHoguin][Beyond OTP]], где он рассказывает, про оптимизации, сделанные в *Cowboy* и *Ranch*.
+Там используются кастомные supervisor и gen_server, благодаря которым
+удалось на 10% увеличить количество запросов в секунду и на 20% снизить latency.
 
-Из презентации Лебедевича:
-- не падать в init :), такие падения не дают стартовать приложению и сложны в отладке (непонятный лог)
-  TODO: воспроизвести ситуацию, дать пример такого лога
-- timeout = infinity, трудно диагносцируемый deadlock,
-  лучше ставить конкретное число, тогда deadlock себя проявит
-  ну или не указывать, пусть будут дефолтные 5 сек
+Там упрощенный supervisor, без child specs, только со стратегией
+temporary, но с дополнительным мониторингом и учетом дочерних
+процессов. Но этот специфический supervisor нам не очень интересен,
+а интересно, что можно сделать с gen_server.
 
-handle_* должны иметь последний клоз catch all и логировать все неизвестные запросы как ошибку
+Можно удалить поддержку удаленных узлов, и работать только с локальными процессами.
+*gen_server:multi_call* и *gen_server:abcast* работать не будут, и не надо :)
 
-gen_server и dialyzer, написание spec для handle_*
+Можно убрать вызов *proc_lib:sync_wait*, не ждать сообщения *{ack, Pid, Return}*,
+и не обрабатывать падение серверного процесса при инициализации.
 
-отправка сообщений и handle_info работают быстрее, чем gen_server:call/cast
-если мы жутко все оптимизируем и экономим на спичках, можно попробовать это.
+В *gen_server:call* можно убрать catch перед *gen:call*, не ловить
+возможные ошибки при отправке сообщения серверному процессу.
+Также в *gen:do_call* можно отказаться от установки и снятия монитора
+на серверный процесс.
 
-If it is necessary to clean up before termination, the shutdown
-strategy must be a timeout value and the gen_server must be set to
-trap exit signals in the init function. When ordered to shutdown, the
-gen_server will then call the callback function terminate(shutdown,
-State):
-init(Args) ->
-    ...,
-    process_flag(trap_exit, true),
-    ...,
-    {ok, State}.
+И можно отказаться от поддержки *Timeout* и *hibernate* в ответах сервера.
 
-...
+То есть, мы жертвуем надежностью ради 10-20% производительности. Стоит ли? :)
+Если вы решили, что стоит, тогда нужно начать с небольшой доки
+[[http://www.erlang.org/doc/design_principles/spec_proc.html][Sys and Proc_Lib]], где описано, как создать свой *special process*
 
-terminate(shutdown, State) ->
-    ..code for cleaning up here..
-    ok.
+Special process -- это процесс который дружит с OTP инфраструктурой:
+- хранит дополнительную информацию о родительском процессе и его предках;
+- поддерживает отладку через модуль *sys*;
+- обрабатывает системные сообщения, приходящие от OTP.
+
+В доке все толково и с примерами описано.
+
+
+* Некоторые рекомендации по использованию gen_server
+
+Ну и напоследок некоторые рекомендации.
+
+Уже говорил и повторю: *init* должен быть очень простым и быстрым.
+Всю сложную инициализацию нужно делать отложено. И не нужно крашиться в *init*.
+
+Если gen_server получает запрос, который не матчится ни с каким клозом в
+*handle_* обработчиках, то он падает, перезапускается супервизором, и
+теряет свое состояние.  Вместо этого лучше сделать, чтобы все
+*handle_call*, *handle_cast*, *handle_info* имели последний клоз
+"catch all", перехватывающий все неизвестные запросы и пишущий
+ошибку (или предупреждение) в лог.
+
+Не нужно ставить timeout = infinity для *gen_server:call*. Если случится
+deadlock на запросе с таким timeout, то его очень сложно будет диагносцировать.
+Поэтому, если 5 секунд по умолчанию вам мало, то ставьте больше, но не infinity.
+И не слишком много, потому что о dead lock вы узнаете, когда истечет этот timeout.
+
+Используйте *call* только тогда, когда вам действительно нужно получить ответ.
+*cast* работает быстрее и не блокирует клиентский процесс.
+
+Посылать сообщения напрямую, в обход *gen_server* и обрабатывать их в
+*handle_info* не запрещено, но считается плохим стилем. Такой код
+сложнее проследить, кто и откуда делал вызов. Этот как в ООП программе
+обращаться к приватным методам в обход публичного АПИ.
+
+Если *init* -- аналог конструктора класса, то *terminate* -- аналог деструктора.
+Тут нужно освобождать ресурсы. Если это требует времени, то нужно
+настроить адекватный timeout для terminate в супервизоре
+(параметр Shutdown в child spec).
+
+*spec* для *handle* функций можно не писать. Они очень громоздкие и не несут никакой пользы,
+ни как документация, ни как опора для dialyzer. Если хотите писать,
+то можете воспользоваться [[http://yzh44yzh.by/post/dialyzer.html][моим рецептом, как сделать эти spec лаконичными]].
