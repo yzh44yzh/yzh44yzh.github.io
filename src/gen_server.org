@@ -1,6 +1,7 @@
+#+OPTIONS: ^:{}
 * gen_server -- сервер внутри сервера
 
-Доклад для 1-й встречи Belarus Erlang User Group
+Доклад для 1-й встречи Belarus Erlang User Group.
 
 21 июня 2014
 
@@ -22,12 +23,12 @@ Fred Hebert ([[http://learnyousomeerlang.com/what-is-otp#its-the-open-telecom-pl
 *gen_server* является базовым паттерном OTP, потому что все остальные: supervisor,
 gen_event, gen_fsm -- реализованы аналогично, но узко специализированны.
 
-Мы загляен в код приложения *stdlib*, которое на моем компьютере находится здесь:
+Мы заглянем в код приложения *stdlib*, которое на моем компьютере находится здесь:
 /usr/local/lib/erlang/lib/stdlib-1.19.4
 (а на вашем я не знаю, где :)
 
 Нас будут интересовать модули:
-[[http://www.erlang.org/doc/man/proc_lib.html][proc_lib]], [[http://www.erlang.org/doc/man/sys.html][sys]] и gen.
+[[http://www.erlang.org/doc/man/gen_server.html][gen_server]], [[http://www.erlang.org/doc/man/proc_lib.html][proc_lib]], [[http://www.erlang.org/doc/man/sys.html][sys]] и gen.
 
 *proc_lib* предлагает функции обертки над стандартными функциями старта процессов
 *erlang:spawn*, *erlang:spawn_link*, *erlang:spawn_opt*, где совершаются дополнительные
@@ -151,7 +152,7 @@ gen_server:cast(Name, Request) ->
     end.
 #+END_SRC
 
-Дальше тот же путь через *gen_call(...)*, *gen:do_call(...)*, *gen_server:loop(...)*,
+Дальше тот же путь через *gen:call(...)*, *gen:do_call(...)*, *gen_server:loop(...)*,
 *gen_server:decode_msg(...)* и, наконец, *gen_server:handle_msg(...)*, но другой клоз,
 откуда сообщение передается на *gen_server:dispatch(...)*. И тут для сообщений
 *{'$gen_cast', Msg}* вызывается *handle_cast*, для всех остальных *handle_info*
@@ -425,6 +426,7 @@ temporary, но с дополнительным мониторингом и уч
 
 В *gen_server:call* можно убрать catch перед *gen:call*, не ловить
 возможные ошибки при отправке сообщения серверному процессу.
+
 Также в *gen:do_call* можно отказаться от установки и снятия монитора
 на серверный процесс.
 

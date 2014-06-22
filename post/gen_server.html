@@ -1,0 +1,726 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>gen_server &#x2013; сервер внутри сервера</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>gen_server &#x2013; сервер внутри сервера</h1>
+<p><i>21 июня 2014</i><p>
+
+<p> Доклад для 1-й встречи Belarus Erlang User Group. </p>
+
+<ul>
+<li><a href="#sec-2">Внутренности gen_server</a>
+<li><a href="#sec-3">Timeout и hibernate</a></li>
+<li><a href="#sec-4">Отладка с помощью модуля sys</a></li>
+<li><a href="#sec-5">Оптимизация производительности</a></li>
+<li><a href="#sec-6">Некоторые рекомендации по использованию gen_server</a></li>
+</ul>
+
+
+<p>
+<b><a href="http://www.erlang.org/doc/man/gen_server.html">gen_server</a></b> хорошо известный и активно используемый паттерн.
+С другой стороны, он требует некоторых усилий для понимания.
+</p>
+
+<p>
+Хороший подход к изучению gen_server &#x2013; написать его самому.
+Такой подход выбрал и Joe Armstrong (<a href="http://pragprog.com/book/jaerlang2/programming-erlang">Programming Erlang, глава 16</a>), и
+Fred Hebert (<a href="http://learnyousomeerlang.com/what-is-otp#its-the-open-telecom-platform">LYSE, глава What is OTP?</a>).
+</p>
+
+<p>
+Способ эффективный, но я в своем докладе не буду его повторять.
+Вы, наверняка, это читали. Ну а если не читали, то прочитаете :)
+Я лучше покопаюсь во внутренностях gen_server и расскажу о некоторых
+нюансах его использования.
+</p>
+
+<h2 id="sec-2">Внутренности gen_server</h2>
+<p>
+<b>gen_server</b> является базовым паттерном OTP, потому что все остальные: supervisor,
+gen_event, gen_fsm &#x2013; реализованы аналогично, но узко специализированны.
+</p>
+
+<p>
+Мы заглянем в код приложения <b>stdlib</b>, которое на моем компьютере находится здесь:
+/usr/local/lib/erlang/lib/stdlib-1.19.4
+(а на вашем я не знаю, где :)
+</p>
+
+<p>
+Нас будут интересовать модули:
+<a href="http://www.erlang.org/doc/man/gen_server.html">gen_server</a>, <a href="http://www.erlang.org/doc/man/proc_lib.html">proc_lib</a>, <a href="http://www.erlang.org/doc/man/sys.html">sys</a> и gen.
+</p>
+
+<p>
+<b>proc_lib</b> предлагает функции обертки над стандартными функциями старта процессов
+<b>erlang:spawn</b>, <b>erlang:spawn_link</b>, <b>erlang:spawn_opt</b>, где совершаются дополнительные
+действия над процессами, чтобы вписать их в инфраструктуру OTP.
+</p>
+
+<p>
+<b>sys</b> используется для отладки OTP-процессов.
+</p>
+
+<p>
+<b>gen</b> (недокументированный) содержит общий код для gen_server, gen_fsm, gen_event и supervisor.
+</p>
+
+
+<h3 id="sec-2-1">gen_server:start_link(&#x2026;)</h3>
+<img src="/img/gen_server/gen_server_init.png"/>
+
+<p>
+На этой схеме и последующих:
+</p>
+<ul class="org-ul">
+<li>Левые квадраты, верхний и нижний &#x2013; это callback-модуль, написанный программистом.
+</li>
+<li>Правые квадраты, верхний и нижний &#x2013; это код OTP фреймворка (модули gen_server, gen, proc_lib).
+</li>
+<li>Верхние квадраты, правый и левый &#x2013; это код, который выполняется в потоке клиента (или родителя).
+</li>
+<li>Нижние квадраты, правый и левый &#x2013; это код, который выполняется в потоке сервера.
+</li>
+</ul>
+
+<p>
+Начинаем отсюда:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">start_link() -&gt;
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+</pre>
+</div>
+
+<p>
+Далее вызывается <b>gen:do_spawn(&#x2026;)</b>,
+где берется Timeout из Options если он там есть, иначе по дефолту задается infinity
+и вызывается <b>proc_lib:start_link(&#x2026;)</b>.
+</p>
+
+<p>
+Дальше вызывается <b>proc_lib:spawn_opt(&#x2026;)</b>
+где определяется родительский процесс и все его предки,
+вызывается <b>erlang:spawn_opt(&#x2026;)</b>, который и создает новый серверный процесс.
+После чего родительский процесс вызывает <b>proc_lib:sync_wait(&#x2026;)</b>,
+блокируется в <b>receive</b> с заданным timeout и ждет сообщение <b>ack</b> от серверного процесса.
+</p>
+
+<p>
+Серверный процесс либо пришлет подтверждение, что он создан и у него все ок <b>{ack, Pid, Return}</b>,
+либо упадет при инициализации <b>{'EXIT', Pid, Reason}</b>, либо ничего не придет до истечения timeout.
+В последнем случае серверный процесс убивается, и возвращается ошибка.
+</p>
+
+<p>
+Тем временем жизнь серверного процесса начинается с <b>gen_server:init_it(&#x2026;)</b>.
+Здесь настраиваются параметры отладки из агрумента <b>Options</b>, если есть,
+и от <b>sys:debug_options(&#x2026;)</b>.
+</p>
+
+<p>
+Затем вызывается <b>init</b> нашего callback-модуля, где мы вольны инициализировать серверный
+процесс как нам угодно. Например, может создать для него структуру данных, хранящее состояние
+и вернуть ее <b>{ok, State}</b>.
+</p>
+
+<p>
+Дальше посылается подтверждение клиентскому процессу <b>proc_lib:init_ack(&#x2026;)</b>.
+И, наконец, серверный процесс входит в основной цикл <b>gen_server:loop(&#x2026;)</b>.
+</p>
+
+<h3 id="sec-2-2">gen_server:call(&#x2026;)</h3>
+<p>
+<img src="/img/gen_server/gen_server_call.png" />
+</p>
+
+<p>
+Начинаем отсюда:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">get_staff() -&gt;
+    gen_server:call(?MODULE, get_staff).
+
+gen_server:call(Name, Request) -&gt;
+    case catch gen:call(Name, '$gen_call', Request) of
+        {ok, Res} -&gt; Res;
+        {'EXIT', Reason} -&gt; exit({Reason, {?MODULE, call, [Name, Request]}})
+    end.
+</pre>
+</div>
+
+<p>
+<b>gen:call(&#x2026;)</b> разбирается, что такое <b>Name</b> &#x2013; процесс, или список узлов;
+и разбрается с Timeout. В отличие от <b>gen_server:start_link</b> здесь timeout по
+умолчанию будет 5 секунд.
+</p>
+
+<p>
+Затем <b>gen:do_call(&#x2026;)</b> делает основную работу:
+</p>
+<ul class="org-ul">
+<li>устанавливает монитор на серверный процесс, который заодно служит уникальным
+идентификатором сообщения;
+</li>
+<li>посылает сообщение серверному процессу <b>{'$gen_call', {self(), Mref}, Request}</b>;
+</li>
+<li>блокируется в <b>receive</b>, ожидая ответного сообщения;
+</li>
+<li>ответ матчится по <b>Mref</b> монитора;
+</li>
+<li>при получении ответа монитор снимается, ответ возвращается клиенту;
+</li>
+<li>обрабатывается падение серверного процесса, возвращается ошибка;
+</li>
+<li>обрабатывается timeout, возвращается ошибка.
+</li>
+</ul>
+
+<p>
+Здесь же обрабатывается и <b>gen_server:multi_call(&#x2026;)</b> на удаленные узлы, так что код сложнее.
+</p>
+
+<p>
+Между тем, серверный процесс, находясь в <b>gen_server:loop(&#x2026;)</b> ждет сообщение. Ловит все подряд,
+обрабатывает в <b>gen_server:decode_msg(&#x2026;)</b>.
+</p>
+
+<p>
+Могут приходить системные сообщения <b>{system, From, Req}</b>,
+они передаются для обработки в <b>sys:handle_system_msg(&#x2026;)</b>. Это могут быть
+сообщения <b>shutdown</b> от супервайзера, запросы на получение и замену состояния
+серверного процесса, используемые при отладке.
+</p>
+
+<p>
+Если включена отладка, то входящие сообщения передаются в <b>sys:handle_debug(&#x2026;)</b>.
+Затем передаются дальше в <b>gen_server:handle_msg(&#x2026;)</b>, где
+отдельный клоз матчится на <b>{'$gen_call', From, Msg}</b>. Тут, наконец, вызывается
+<b>handle_call</b> нашего модуля, обрабатываются все варианты ответов и ошибки,
+после чего ответ посылается сообщением клиентскому процессу, а серверный
+опять входит в <b>gen_server:loop(&#x2026;)</b>.
+</p>
+
+<p>
+Если включена отладка, то исходящие сообщения тоже передаются в <b>sys:handle_debug(&#x2026;)</b>.
+</p>
+
+
+<h3 id="sec-2-3">gen_server:cast(&#x2026;)</h3>
+<p>
+<img src="/img/gen_server/gen_server_cast.png" />
+</p>
+
+<p>
+Ну тут ответ не нужен, так что все проще.
+</p>
+
+<p>
+Начало аналогичное:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">add_staff(Staff) -&gt;
+    gen_server:cast(?MODULE, {add_staff, Staff}).
+
+gen_server:cast(Name, Request) -&gt;
+    case catch gen:call(Name, '$gen_cast', Request) of
+        {ok, Res} -&gt; Res;
+        {'EXIT', Reason} -&gt; exit({Reason, {?MODULE, call, [Name, Request]}})
+    end.
+</pre>
+</div>
+
+<p>
+Дальше тот же путь через <b>gen:call(&#x2026;)</b>, <b>gen:do_call(&#x2026;)</b>, <b>gen_server:loop(&#x2026;)</b>,
+<b>gen_server:decode_msg(&#x2026;)</b> и, наконец, <b>gen_server:handle_msg(&#x2026;)</b>, но другой клоз,
+откуда сообщение передается на <b>gen_server:dispatch(&#x2026;)</b>. И тут для сообщений
+<b>{'$gen_cast', Msg}</b> вызывается <b>handle_cast</b>, для всех остальных <b>handle_info</b>
+нашего модуля.
+</p>
+
+<h3 id="sec-2-4">Некоторые нюансы о callback-функциях</h3>
+<h4 id="sec-2-4-1">start_link</h4>
+<p>
+Для старта <b>gen_server</b> есть 4 функции <b>start/3</b>, <b>start/4</b>, <b>start_link/3</b>, <b>start_link/4</b>.
+Сперва о разнице между <b>start</b> и <b>start_link</b>. Второй вариант создает связь между родительским
+процессом и серверным. Первый вариант такой связи не создает. Второй вариант всегда должен
+использоваться в реальном коде, чтобы супервизор мог мониторить своих потомков. Первый
+вариант можно использовать в консоли, чтобы запускать разрабатываемый модуль для отладки.
+</p>
+
+<p>
+C аргументами, я полагаю, все должно быть понятно, дублировать документацию не буду :)
+Единственное, чтобы понять последний аргумент <b>Options</b>, нужно читать документацию по
+<a href="http://www.erlang.org/doc/man/erlang.html#spawn_opt-4">erlang:spawn_otp</a>. Там настройки работы с памятью и приоритета процесса.
+Впрочем, это чаще всего не нужно трогать.
+</p>
+
+<h4 id="sec-2-4-2">init</h4>
+<p>
+<b>init</b> блокирует родительский процесс, причем с timeout = infinity по умолчанию. Желательно
+оставлять эту функцию легковесной, и возвращать управление родителю как можно быстрее.
+</p>
+
+<p>
+Если инициализация сервера требует долгих действий (чтение файлов, установку соединения с базой и т.д.),
+то такие вещи лучше делать отложено.
+</p>
+
+<p>
+Отложенную инициализацию можно сделать двумя способами:
+</p>
+
+<p>
+Послать самому себе сообщение, поймать его в handle_info, и сделать тяжелую инициализацию там.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">init(Args) -&gt;
+    State = ...
+    self() ! heavy_init,
+    {ok, State}.
+
+handle_info(heavy_init, State) -&gt;
+    NewState = ...
+    {noreply, NewState};
+</pre>
+</div>
+
+<p>
+Или задать timeout = 0 в ответе <b>init</b> и в <b>handle_info</b> обработать сообщение <b>timeout</b>
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">init(Args) -&gt;
+    State = ...
+    {ok, State, 0}.
+
+handle_info(timeout, State) -&gt;
+    NewState = ...
+    {noreply, NewState};
+</pre>
+</div>
+
+
+<p>
+Про изначальный смыл <b>{ok, State, Timeout}</b> будет ниже.
+</p>
+
+<p>
+А еще очень нежелательно в <b>init</b> крашится :) Такой краш обычно проявляется на старте приложения,
+а старт приложения обычно происходит на старте узла. Так что при этом весь узел падает, и с не
+очень понятными сообщениями в логе.
+</p>
+
+<h4 id="sec-2-4-3">handle_call</h4>
+<p>
+<b>handle_call</b> имеет 8 вариантов ответа.
+</p>
+
+<p>
+3 <b>reply</b>:
+</p>
+<ul class="org-ul">
+<li>{reply, Reply, NewState}
+</li>
+<li>{reply, Reply, NewState, Timeout}
+</li>
+<li>{reply, Reply, NewState, hibernate}
+</li>
+</ul>
+
+<p>
+3 <b>noreply</b>:
+</p>
+<ul class="org-ul">
+<li>{noreply, NewState}
+</li>
+<li>{noreply, NewState, Timeout}
+</li>
+<li>{noreply, NewState, hibernate}
+</li>
+</ul>
+
+<p>
+2 <b>stop</b>:
+</p>
+<ul class="org-ul">
+<li>{stop, Reason, Reply, NewState}
+</li>
+<li>{stop, Reason, NewState}
+</li>
+</ul>
+
+<p>
+Про Timeout и hibernate будет ниже, reply и stop понятны. noreply нужно объяснить.
+</p>
+
+<p>
+Клиент в любом случае должен получить ответ на вызов gen_server:call. Если мы ответ не пошлем,
+то клиентский процесс упадет.
+</p>
+
+<p>
+Другое дело, что ответ мы можем послать раньше, чем полностью отработает весь код в handle_call.
+Например, если обработка запроса займет некоторое время, и мы не хотим блокировать клиента на
+все это время, то мы можем дать ответ раньше, вызовом <b>gen_server:reply(From, Reply)</b>. Затем
+выполнить обработку, затем вернуть <b>noreply</b> или <b>stop</b> без Reply.
+</p>
+
+<h4 id="sec-2-4-4">handle_cast и handle_info</h4>
+<p>
+handle_cast и handle_info имеют 4 варианта ответа:
+</p>
+<ul class="org-ul">
+<li>{noreply, NewState}
+</li>
+<li>{noreply, NewState, Timeout}
+</li>
+<li>{noreply, NewState, hibernate}
+</li>
+<li>{stop, Reason, NewState}
+</li>
+</ul>
+
+<p>
+Тоже самое, что и handle_call, только отвечать клиенту не нужно.
+</p>
+
+<h4 id="sec-2-4-5">format_status</h4>
+<p>
+Необязательный callback, который редко определяют, потому что они
+имеет реализацию по умолчанию, подходящую для большинства случаев.
+</p>
+
+<p>
+Этот callback используется для формирования crash report &#x2013; сообщения
+об ошибке при падении процесса.  Там собирается информация о процессе,
+его родителях, инфа из <b>sys:get_debug</b> и, конечно, состояние процесса.
+</p>
+
+<p>
+Так вот, это состояние может быть большой и сложной структурой, которую
+всю целиком выводить в лог не хочется. Тогда можно сделать свою реализацию,
+которая покажет состояние как-нибудь более компактно и информативно.
+</p>
+
+<p>
+Вместо
+</p>
+<div class="org-src-container">
+<pre class="src src-Erlang">[{data, [{"State", State}]}],
+</pre>
+</div>
+<p>
+сделать
+</p>
+<div class="org-src-container">
+<pre class="src src-Erlang">[{data, [{"State", get_important_part_of(State)}]},
+</pre>
+</div>
+
+
+<h2 id="sec-3">Timeout и hibernate</h2>
+<p>
+<b>init</b>, <b>handle_call</b>, <b>handle_cast</b> и <b>handle_info</b> могут вернуть Timeout или hibernate.
+</p>
+
+<p>
+Если задан Timeout, и в течение этого Timeout gen_server не получает никаких сообщений,
+то он сам себе генерирует сообщение <b>timeout</b>, и его можно обработать в <b>handle_info</b>.
+Например, можно сделать так, что если сервер 5 минут не получает никаких сообщений,
+то он отравляется в hibernate.
+</p>
+
+<p>
+Ну а если сообщения поступают раньше, то они отменяют Timeout. А повторно его можно
+установить (или не устанавливать) по результатам обработки сообщений в соответствующем
+<b>handle_call/handle_cast</b>.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">init(Args) -&gt;
+    State = ...,
+    {ok, State, 5 * 60 * 1000}.
+
+handle_info(timeout, State) -&gt;
+    io:format("~p no messages from clients, hibernate", [?MODULE]),
+    {noreply, State, hibernate}.
+</pre>
+</div>
+
+
+<p>
+<a href="http://www.erlang.org/doc/man/erlang.html#hibernate-3">hibernate</a> &#x2013; это особое состояние процесса, в котором он занимает минимум памяти.
+При этом отбрасывается стек, проводится сборка мусора, дефрагментируется heap.
+</p>
+
+<p>
+Как только процесс получает сообщение, он выходит из hibernate и обрабатывает его.
+Однако вход в hibernate требует времени, и явно не стоит им злоупотреблять.
+Этот режим имеет смысл, если процесс редко получает сообщения,
+а большую часть времени проводит в ожидании, ничего не делая.
+</p>
+
+<h2 id="sec-4">Отладка с помощью модуля sys</h2>
+<p>
+<b>gen_server</b> и другие OTP модули уже имеет встроенные средства отладки.
+</p>
+
+<p>
+Посмотрим некоторые функции модуля <a href="http://www.erlang.org/doc/man/sys.html">sys</a>.
+</p>
+
+<p>
+<b>sys:trace(Name, Flag)</b> позволяет включить-выключить вывод в консоль всех сообщений, которые
+проходят через <b>gen_server</b>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">&gt; sys:trace(e_prof, true).
+ok
+&gt; e_prof:add_action("some", 5).
+*DBG* e_prof got cast {add_action,"some",5}
+*DBG* e_prof new state {state,[{action_accum,[115,111,109,101],[5]}],[{action_stat_set,{16,15,4},[]},{action_stat_set,{16,14,4},[]},{action_stat_set,{16,13,4},[]},{action_stat_set,{16,12,4},[]},{action_stat_set,{16,11,4},[]}]}
+ok
+&gt; e_prof:add_action("some", 15).
+*DBG* e_prof got cast {add_action,"some",15}
+*DBG* e_prof new state {state,[{action_accum,[115,111,109,101],[15,5]}],[{action_stat_set,{16,15,4},[]},{action_stat_set,{16,14,4},[]},{action_stat_set,{16,13,4},[]},{action_stat_set,{16,12,4},[]},{action_stat_set,{16,11,4},[]}]}
+ok
+&gt; sys:trace(e_prof, false).
+ok
+</pre>
+</div>
+
+
+<p>
+<b>sys:statistics(Name, Flag)</b> собирает и показывает статистику работы серверного процесса:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">&gt; sys:statistics(e_prof, true).
+ok
+&gt; sys:statistics(e_prof, get).
+{ok,[{start_time,{{2014,6,18},{16,14,43}}},
+     {current_time,{{2014,6,18},{16,17,10}}},
+     {reductions,360},
+     {messages_in,5},
+     {messages_out,0}]}
+&gt; sys:statistics(e_prof, false).
+ok
+</pre>
+</div>
+
+
+<p>
+<b>sys:get_state(Name) -&gt; State</b> позволяет получить состояние процесса:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">&gt; sys:get_state(e_prof).
+{state,[],
+       [{action_stat_set,{16,21,4},[]},
+        {action_stat_set,{16,20,4},[]},
+        {action_stat_set,{16,19,4},[]},
+        {action_stat_set,{16,18,4},[]},
+        {action_stat_set,{16,17,4},[]}]}
+</pre>
+</div>
+
+
+<p>
+<b>sys:get_status(Name) -&gt; Status</b> дает еще больше инфы о процессе:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-Erlang">&gt; sys:get_status(e_prof).
+{status,&lt;0.136.0&gt;,
+        {module,gen_server},
+        [[{'$ancestors',[e_prof_sup,&lt;0.134.0&gt;]},
+          {'$initial_call',{e_prof,init,1}}],
+         running,&lt;0.135.0&gt;,
+         [{statistics,{{{2014,6,18},{16,14,43}},
+                       {reductions,3590},
+                       4,0}}],
+         [{header,"Status for generic server e_prof"},
+          {data,[{"Status",running},
+                 {"Parent",&lt;0.135.0&gt;},
+                 {"Logged events",[]}]},
+          {data,[{"State",
+                  {state,[],
+                         [{action_stat_set,{16,16,4},
+                                           [{action_stat,"some",10.0,15,...}]},
+                          {action_stat_set,{16,15,4},[]},
+                          {action_stat_set,{16,14,4},[]},
+                          {action_stat_set,{16,13,4},[]},
+                          {action_stat_set,{16,12,...},[]}]}}]}]]}
+</pre>
+</div>
+
+<p>
+Очевидно, что эта отладка дает некоторый оверхед.
+Но все сделано по уму &#x2013; отладка включается и выключается.
+</p>
+
+
+<h2 id="sec-5">Оптимизация производительности</h2>
+<p>
+Ну а теперь подходим к самому интересному. Мы ведь полезли во
+внутренности OTP не просто так, а чтобы поискать, где можно выжать
+больше производительности. Всем нам хочется узнать, где и как можно похачить
+реализацию gen_server, чтобы работало быстрее :)
+</p>
+
+<p>
+Понятное дело, что разработчики уже ходили этим путем. Например, этим занимался
+Луик Хоген (Loïc Hoguin), основатель компании <b>99s</b> и автор <b>Cowboy</b>.
+</p>
+
+<p>
+Есть его выступление на Erlang Factory 2013
+<a href="http://www.erlang-factory.com/conference/ErlangUserConference2013/speakers/LoicHoguin">Beyond OTP</a>, где он рассказывает, про оптимизации, сделанные в <b>Cowboy</b> и <b>Ranch</b>.
+Там используются кастомные supervisor и gen_server, благодаря которым
+удалось на 10% увеличить количество запросов в секунду и на 20% снизить latency.
+</p>
+
+<p>
+Там упрощенный supervisor, без child specs, только со стратегией
+temporary, но с дополнительным мониторингом и учетом дочерних
+процессов. Но этот специфический supervisor нам не очень интересен,
+а интересно, что можно сделать с gen_server.
+</p>
+
+<p>
+Можно удалить поддержку удаленных узлов, и работать только с локальными процессами.
+<b>gen_server:multi_call</b> и <b>gen_server:abcast</b> работать не будут, и не надо :)
+</p>
+
+<p>
+Можно убрать вызов <b>proc_lib:sync_wait</b>, не ждать сообщения <b>{ack, Pid, Return}</b>,
+и не обрабатывать падение серверного процесса при инициализации.
+</p>
+
+<p>
+В <b>gen_server:call</b> можно убрать catch перед <b>gen:call</b>, не ловить
+возможные ошибки при отправке сообщения серверному процессу.
+</p>
+
+<p>
+Также в <b>gen:do_call</b> можно отказаться от установки и снятия монитора
+на серверный процесс.
+</p>
+
+<p>
+И можно отказаться от поддержки <b>Timeout</b> и <b>hibernate</b> в ответах сервера.
+</p>
+
+<p>
+То есть, мы жертвуем надежностью ради 10-20% производительности. Стоит ли? :)
+Если вы решили, что стоит, тогда нужно начать с небольшой доки
+<a href="http://www.erlang.org/doc/design_principles/spec_proc.html">Sys and Proc_Lib</a>, где описано, как создать свой <b>special process</b>
+</p>
+
+<p>
+Special process &#x2013; это процесс который дружит с OTP инфраструктурой:
+</p>
+<ul class="org-ul">
+<li>хранит дополнительную информацию о родительском процессе и его предках;
+</li>
+<li>поддерживает отладку через модуль <b>sys</b>;
+</li>
+<li>обрабатывает системные сообщения, приходящие от OTP.
+</li>
+</ul>
+
+<p>
+В доке все толково и с примерами описано.
+</p>
+
+<h2 id="sec-6">Некоторые рекомендации по использованию gen_server</h2>
+<p>
+Ну и напоследок некоторые рекомендации.
+</p>
+
+<p>
+Уже говорил и повторю: <b>init</b> должен быть очень простым и быстрым.
+Всю сложную инициализацию нужно делать отложено. И не нужно крашиться в <b>init</b>.
+</p>
+
+<p>
+Если gen_server получает запрос, который не матчится ни с каким клозом в
+<b>handle_</b> обработчиках, то он падает, перезапускается супервизором, и
+теряет свое состояние.  Вместо этого лучше сделать, чтобы все
+<b>handle_call</b>, <b>handle_cast</b>, <b>handle_info</b> имели последний клоз
+"catch all", перехватывающий все неизвестные запросы и пишущий
+ошибку (или предупреждение) в лог.
+</p>
+
+<p>
+Не нужно ставить timeout = infinity для <b>gen_server:call</b>. Если случится
+deadlock на запросе с таким timeout, то его очень сложно будет диагносцировать.
+Поэтому, если 5 секунд по умолчанию вам мало, то ставьте больше, но не infinity.
+И не слишком много, потому что о dead lock вы узнаете, когда истечет этот timeout.
+</p>
+
+<p>
+Используйте <b>call</b> только тогда, когда вам действительно нужно получить ответ.
+<b>cast</b> работает быстрее и не блокирует клиентский процесс.
+</p>
+
+<p>
+Посылать сообщения напрямую, в обход <b>gen_server</b> и обрабатывать их в
+<b>handle_info</b> не запрещено, но считается плохим стилем. Такой код
+сложнее проследить, кто и откуда делал вызов. Этот как в ООП программе
+обращаться к приватным методам в обход публичного АПИ.
+</p>
+
+<p>
+Если <b>init</b> &#x2013; аналог конструктора класса, то <b>terminate</b> &#x2013; аналог деструктора.
+Тут нужно освобождать ресурсы. Если это требует времени, то нужно
+настроить адекватный timeout для terminate в супервизоре
+(параметр Shutdown в child spec).
+</p>
+
+<p>
+<b>spec</b> для <b>handle</b> функций можно не писать. Они очень громоздкие и не несут никакой пользы,
+ни как документация, ни как опора для dialyzer. Если хотите писать,
+то можете воспользоваться <a href="/post/dialyzer.html">моим рецептом, как сделать эти spec лаконичными</a>.
+</p>
+
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
