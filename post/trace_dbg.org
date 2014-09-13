@@ -1,0 +1,68 @@
+* TODO прочитать
+
+** DONE статья Трескина
+http://mtreskin.metalkia.com/post/108
+
+** TODO 17-я глава в книге Чезарини
+
+** TODO сделать упражения по этой главе
+
+** TODO документация
+http://www.erlang.org/doc/man/erlang.html#trace-3
+http://www.erlang.org/doc/man/dbg.html
+
+* TODO тестовый проект
+сделать
+придумать сценарий отладки
+потренировать его
+
+* TODO собственно доклад
+
+built-in low-level tracing mechanisms on which to build tools that can be used for live troubleshooting.
+
+erlang:trace/3 BIF
+part of the first version of the language
+become the foundation for a set of tools
+
+local call -- вызов функции текущего модуля
+
+global call -- вызов функции другого модуля
+
+trace events:
+- function call, with arguments and result, calling function, timestamp
+
+printed to shell
+or send to socket
+
+match specification on arguments
+
+На производительность обычно не влияет, но есть опасность получить большое к-во trace events
+которые забьют вывод на консоль, и которые таки повлияют и на производительность.
+Так что нужно быть осторожным.
+
+dbg tracer tool, a user-friendly encapsulation of the trace BIFs and match specifications
+
+** erlang:trace/3
+
+Trace events are sent as messages of the following format:
+{trace, Pid, Tag, Data1 [,Data2]}
+
+• Global and local function calls
+• Process-related activities and message passing
+• Garbage collection and memory usage
+
+tracer process
+only one process may receive trace events
+one that made the call to erlang:trace/3
+tracer process cannot be traced
+
+PidSpec:
+- pid, different forms: {N, N, N}, "<N.N.N>" etc
+- registered name
+- atom: existing, new, all
+
+TraceFlags:
+- send, 'receive'
+- {tracer, Pid}
+
+* TODO ну и презентация
