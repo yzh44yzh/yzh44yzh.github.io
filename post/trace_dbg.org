@@ -1,68 +1,474 @@
-* TODO прочитать
+* Отладка средствами trace/dbg/sys
 
-** DONE статья Трескина
-http://mtreskin.metalkia.com/post/108
+Уж так устроена жизнь программиста, что в ней есть не только веселый и
+интересный процесс написания нового кода, но и скучный, нудный процесс
+отладки написанного.
 
-** TODO 17-я глава в книге Чезарини
+И какие найдутся для этого средства? Да много их:
+- отладка через логи в консоль или файл;
+- debugger;
+- trace/dbg;
+- sys;
+- библиотеки-обертки над все этим от третьих сторон.
 
-** TODO сделать упражения по этой главе
+Полагаю, что многие, как и я сам, хорошо знакомы с отладкой через
+логи.  *lager*, *io:format* (вероятно обернутый в макрос или функцию)
+-- вот они, друзья программиста :)
 
-** TODO документация
+Такая отладка понятна, но не всегда удобна. Особенно в продакшн, где
+по логам затруднительно наблюдать происходящее в реальном времени, а
+приходится изучать постфактум. Ну об этом рассказывать не буду.
+
+Имеется графический отладчик, [[http://www.erlang.org/doc/apps/debugger/debugger_chapter.html][debugger]]. Он менее известен.
+Я вот и не пользовался ни разу. Но кому-то, наверное, полезен :)
+
+Про debugger надо сказать, что он отлаживает один процесс, а в это
+время остальные процессы живут своей жизнью. И, вероятно, пытаются
+взаимодействовать с отлаживаемым процессом. Посылают сообщения,
+ждут ответа. А отлаживаемый процесс как раз остановлен брейкпоинтом.
+
+Понятно, что возможны всякие побочные эффекты, истекания таймаутов и т.д.
+И понятно, что его не применишь в продакшен ноде.
+
+Все это в том или ином виде есть в большинстве языков. А Erlang, кроме этого,
+предлагает свои инструменты. Причем встроенные на самом низком уровне,
+с низким влиянием на работу системы (с некоторыми оговорками),
+и применимую для отладки в реальном времени на продакшене. Об этом и поговорим.
+
+Тулы эти мощные, но довольно сложные в освоении. Конечно, есть документация.
+Но лучше начать с более простых источников:
+
+*trace/dbg* неплохо описаны в 17-й главе [[http://www.amazon.com/Erlang-Programming-Francesco-Cesarini/dp/0596518188]["Erlang Programming" Francesco Cesarini]]
+и в 9 главе [[http://www.erlang-in-anger.com/]["Stuff Goes Bad. Erlang in Anger" Fred Hebert]].
+
+У Цезарини более подробно и обстоятельно. У Фреда кратко и больше про *recon* --
+его тулзу для мониторинга системы, и *recon_trace* -- обертку над dbg, кое-что
+упрощающую и кое-что полезное добавляющую.
+
+
+** erlang:trace, erlang:trace_pattern
+
+Функции модуля *erlang*, низкоуровневый инструмент, который является основанием для других,
+более удобных тулов. Присутствует в языке с первой версии.
+
+Сами эти функции и работающий поверх них dbg на производительность вляют мало.
+Но при трассировке могут генерироваться очень большое количество событий.
+И если все они направляются на консоль, то во-первых, нагрузят io, и этим таки
+повляют на систему. Во-вторых, сделают невозможным ввод с консоли.
+
+Так что нужно быть осторожным, выбирая параметры трассировки. И использовать
+более грамотные обертки, как *recon_trace* Фреда Хеберта.
+
+
+*** erlang:trace(PidSpec, How, FlagList) -> integer()
+
 http://www.erlang.org/doc/man/erlang.html#trace-3
+
+У функции 3 аргумента.
+
+*PidSpec* указывает, какие процессы мы хотим трассировать.
+*How* это флаг, включающий или выключающий трассировку.
+*FlagList* указывает, какие события на этих процессах мы хотим трассировать.
+
+PidSpec имеет варианты:
+- Pid процесса в разных формах (собственно Pid, кортеж {N, N, N}, строка "<N.N.N>");
+- имя, под которым процесс зарегистрирован;
+- атомы: existing, new, all;
+
+*existing* -- трассировать имеющиеся процессы, игнорировать новые, которые создаются уже после того,
+как трассировка включена.
+*new* -- наоборот, игнорировать имеющиеся процессы, трассировать новые.
+*all* -- трассировать все процессы.
+
+*FlagList* имеет много вариантов. Рассмотрим некоторые.
+
+- send, 'receive' -- трассировать отправку/получение сообщений
+- procs -- трассировать события жизненного цикла процесса и связи между процессами:
+           spawn, exit,
+           link, unlink, getting_linked, getting_unlinked,
+           register, unregister
+- call -- трассировать вызовы функций (подробности ниже)
+- running -- трассировать работу планировщика процессов
+- garbage_collection -- трассировать сборку мусора
+
+Когда включена трассировка, генерируются специальные сообщения вида:
+{trace, Pid, EventTag, Data1 [,Data2]}
+
+Например:
+{trace, Pid, 'receive', Msg} - процесс Pid получил сообщение Msg
+{trace, Pid, send, Msg, To} - процесс Pid отправил сообщение Msg процессу To
+{trace, Pid, call, {M, F, Args}} - процесс Pid начал выполнение функции {M, F, Args}
+и т.д.
+
+Кто получает эти сообщения? По умолчанию тот процесс, который вызвал *erlang:trace*
+Но можно при вызове указать FlagList аргумент {tracer, Pid}, и сделать получателем
+сообщений какой-нибудь другой процесс.
+
+Процесс-получатель называется *tracer process*, и он может быть только один.
+По понятным причинам, для него самого трассировку включить нельзя.
+
+TODO: примеры в консоли
+
+
+*** erlang:trace_pattern(MFA, MatchSpec, FlagList) -> integer()
+
+http://www.erlang.org/doc/man/erlang.html#trace_pattern-3
+
+Итак, мы теперь можем выбрать, какие процессы хотим трассировать.
+Но обычно нам интересно наблюдать вызовы функций, аргументы
+и возвращаемые значения.
+
+Для этого нужно вызвать еще и erlang:trace_pattern/3.
+
+И мы будем получать события трассировки, когда заданные в *erlang:trace*
+процессы будут вызывать заданные в *erlang:trace_pattern* функции.
+
+Тут аргументы посложнее :)
+
+Первый аргумент MFA указывает функцию, которую мы хотим трассировать.
+Это кортеж *{Module, Function, Arity}*, который однозначно указывает
+функцию. Но он допускает wildcards, и так может указывать на несколько
+функций:
+{Module, Function, '_'} -- все функции с таким именем и любым Arity;
+{Module, '_', '_'} -- все функции данного модуля;
+{'_', '_', '_'} -- вообще все функции.
+
+Второй аргумент, MatchSpec, сложнее.
+
+Во-первых, он используется для включения-выключения трассировки (как и в erlang:trace)
+если задать значения true/false.
+
+Во-вторых, может управлять счетчиками вызовов функций,
+и счетчиками времени выполнения функций. Подробности в документации.
+
+И, наконец, можно задать собственно *match specification*, чтобы
+событие трассировки генерировалось не для любого вызова функции,
+а в зависимости от аргументов. Подробности ниже.
+
+Третий аргумент, TraceFlags, добавляет еще некоторые опции:
+
+global -- трассировать только глобальные вызовы;
+local -- трассировать любые вызовы (и глобальные и локальные)
+
+Глобальный вызов, это вызов экспортированной функции с указанием модуля:
+my_module:my_func(Arg).
+
+А вот это локальный вызов:
+my_func(Arg).
+
+call_count -- включает счетчик вызовов функции;
+call_time -- добавляет время выполнения функции в событие трассировки.
+
+TODO: примеры в консоли
+
+
+** dbg
+
+Как видно, *erlang:trace* и *erlang:trace_pattern* хоть и мощные, но не удобные
+в использовании. Придется печатать много букв в консоли, чтобы управлять трассировкой
+с их помощью. Модуль *dbg* делает такое управление более удобным и лаконичным.
+
 http://www.erlang.org/doc/man/dbg.html
 
-* TODO тестовый проект
-сделать
-придумать сценарий отладки
-потренировать его
+У Цезарини читаем:
 
-* TODO собственно доклад
+Small impact on system performance, making it a suitable candidate for
+tracing large live systems.
 
-built-in low-level tracing mechanisms on which to build tools that can be used for live troubleshooting.
+У Хеберта читаем:
 
-erlang:trace/3 BIF
-part of the first version of the language
-become the foundation for a set of tools
+Its interface is a bit clunky in terms of usability, but it’s entirely
+good enough to do what you need. The problem with it is that you have
+to know what you’re doing, because dbg can log absolutely everything
+on the node and kill one in under two seconds.
 
-local call -- вызов функции текущего модуля
+Так что трейсить большие продакшен системы конечно можно, и нужно. Но с осторожностью :)
 
-global call -- вызов функции другого модуля
+В документации мы видим целую пачку функций с короткими непонятными названиями:
+dbg:p/2, dbg:p/3, dbg:tp/2 и т.д. Все они обертки, задающие те или иные аргументы
+для erlang:trace, erlang:trace_pattern. А короткие они для того, чтобы их быстро
+набирать в консоли.
 
-trace events:
-- function call, with arguments and result, calling function, timestamp
+Рассмотрим некоторые из них.
 
-printed to shell
-or send to socket
+*** dbg:p(PidSpec, FlagLists) -> {ok, MatchDesc} | {error, term()}
 
-match specification on arguments
+PidSpec такой же, как в erlang:trace. То есть, Pid процесса в разных видах,
+имя процесса, или атомы: all, new, existing.
 
-На производительность обычно не влияет, но есть опасность получить большое к-во trace events
-которые забьют вывод на консоль, и которые таки повлияют и на производительность.
-Так что нужно быть осторожным.
+FlagLists принимает аналогичные значения, как в erlang:trace, но в лаконичном виде:
+- *s* (send), *r* (received), *m* (message = send + receive)
+- *p* (procs) события spawn, exit, link, unlink, getting_linked, getting_unlinked, register, unregister
+- *c* (call)
 
-dbg tracer tool, a user-friendly encapsulation of the trace BIFs and match specifications
+Таким образом вызов:
 
-** erlang:trace/3
+dbg:p({0.55.0}, m)
 
-Trace events are sent as messages of the following format:
-{trace, Pid, Tag, Data1 [,Data2]}
+аналогичен вызову:
 
-• Global and local function calls
-• Process-related activities and message passing
-• Garbage collection and memory usage
+erlang:trace({0.55.0}, true, [send, 'receive'])
 
-tracer process
-only one process may receive trace events
-one that made the call to erlang:trace/3
-tracer process cannot be traced
 
-PidSpec:
-- pid, different forms: {N, N, N}, "<N.N.N>" etc
-- registered name
-- atom: existing, new, all
+*** dbg:c(Mod, Fun, Args, FlagList)
 
-TraceFlags:
-- send, 'receive'
-- {tracer, Pid}
+Оберкта для *erlang:trace_pattern*, выполняет:
 
-* TODO ну и презентация
+erlang:trace_pattern({Mod, Fun, Args}, true, FlagList),
+apply(Mod, Fun, Args),
+
+То есть, задает trace_pattern для функции, и тут же ее вызвает.
+Удобный способ, чтобы быстро отладить конкретную функцию.
+
+Причем вызов *dbg:c* должен идти в паре с вызовом *dbg:p*,
+так же, как в паре идут *erlang:trace* и *erlang:trace_pattern*
+
+Есть вариант *dbg:c(Mod, Fun, Args)*, без указания FlagList. В этом случае
+автоматически устанавливаются все флаги.
+
+
+*** dbg:tp/2,3,4, dbg:tpl/2,3,4
+
+Тоже обертка для *erlang:trace_pattern*, в нескольких вариантах. Позволяет задать MatchSpec.
+
+*dbg:tp* ставит флаг global, и трассирует глобальные вызовы.
+*dbg:tpl* ставит флаг local, и трассирует все вызовы.
+
+Аргументы:
+
+dbg:tp(Module,MatchSpec)
+тоже самое, что
+erlang:trace_pattern({Module, '_', '_'}, MatchSpec, [])
+
+dbg:tp(Module,Function,MatchSpec)
+тоже самое, что
+erlang:trace_pattern({Module, Function, '_'}, MatchSpec, [])
+
+dbg:tp(Module, Function, Arity, MatchSpec)
+тоже самое, что
+erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
+
+
+*** dbg:ctp/0,1,2,3, dbg:ctpg/0,1,2,3, dbg:ctpl/0,1,2,3
+
+Эти функции останавливают трассировку, запущенную предыдущими функциями:
+- dbg:ctpg останавливает, если запущено через dbg:tp
+- dbg:ctpl останавливает, если запущено через dbg:tpl
+- dbg:ctp останавливает, неважно как запущено
+
+Да, с остановкой трассировки намудрили. Мало того, что нужно совпать по аргументам,
+так еще нужно помнить, какой функцией трассировка запускалась :)
+
+
+*** dbg:stop/0, dbg:stop_clean/0
+
+Вышеуказанные функции останавливают трассировку, но не отменяют установленные флаги.
+
+*dbg:stop* останавливает все трассировки, сбрасывает все флаги, закрывает порты
+(если был редирект событий трассировки в порты). Но не сбрасывает MatchSpec.
+То есть, отменяет *erlang:trace* но не отменяет *erlang:trace_pattern*
+
+*dbg:stop_clear* тоже самое, плюс отменяет *erlang:trace_pattern*
+
+TODO: примеры в консоли
+
+
+** Перенаправление событий трассировки
+
+По умолчанию события трассировки получает *tracer process*. Он их форматирует и выводит на консоль.
+Но их можно перенаправить в кастомную функцию, в файл, или на другую ноду.
+
+*** В кастомную функцию
+
+*dbg:tracer(process , {HandlerFun, Data})*
+
+Так можно задать кастомную функцию. Она должна получать 2 аргумента -- событие трассировки
+и аккумулятор. Аргумент *Data* -- начальное значение аккумулятора. Функция возвращает
+новое значение аккумулятора.
+
+Таким образом можно организовать накопление некоторых данных в
+аккумуляторе. Что может пригодится, например, для анализа работы
+сборщика мусора, если трассируются события, связанный с его работой.
+
+*** В файл
+
+Сперва нужно получить ссылку на port function.
+
+PortFun = dbg:trace_port(file, FileOptions)
+
+*FileOptions* могут быть разными (см документацию).
+Например *{FileName, wrap, FileSuffix}* задает ротацию в файлах, аналогично, как ротируются логи.
+
+Затем вызваем
+
+dbg:tracer(port, PortFun)
+
+
+*** На другую ноду
+
+Направить события в порт несколько сложнее. Сперва нужно получить ссылку на port function.
+
+PortFun = dbg:trace_port(ip, Port)
+
+Где *Port* -- это номер порта или кортеж *{PortNumber, QueueSize}*.
+
+Затем вызваем
+
+dbg:tracer(port, PortFun)
+
+Опция *QueueSize* позволяет ограничить количество сообщений, которые хранятся в буфере.
+Это полезно, если клиент не успевает их забирать. Лишние события будут просто игнорироваться.
+
+На другой ноде нужно вызывать
+
+dbg:trace_client(ip, Arg, {HandlerFun, Data})
+
+Где *Arg* это номер порта или кортеж *{HostName, PortNumber}*
+
+Такой клиент будет получать события из порта и обрабатывать их кастомной функцией.
+
+
+** Match Specifications
+
+Мощный, но сложный инструмент. Это аргумент для *erlang:trace_pattern* или *dbg:tp*,
+позволяющий трассировать функцию не при каждом ее вызове, а в зависимости от ее аргументов.
+
+match specification consists of an Erlang term describing a small pro-
+gram that expresses a condition to be matched over a set of arguments
+
+they mainly deal with the filtering and manipulation of trace events
+
+If they match successfully, a trace
+event is generated and some predefined actions can be executed
+
+Match specifications
+are compiled to a format close to the one used by the emulator, making them more
+efficient than functions
+
+the specifications are
+complex to write, and at first glance, they look incomprehensible
+
+you can generate match specifications covering a majority of simple but useful
+cases using the dbg:fun2ms/1 call
+much easier to read, write, modify, and debug
+
+using dbg:fun2ms/1 to turn an anonymous fun into a match specification, which is
+used when setting trace flags on local and global calls
+
+The function dbg:fun2ms/1 takes a literal fun as an argument and returns a match spec-
+ification describing the properties in the fun.
+
+By “literal fun,” we mean a fun that is
+typed in and passed as a parameter, not a fun that is bound to a variable which is then
+passed as an argument, or a fun that results from applying a higher-order function.
+
+handled by the precompiler
+
+dbg:fun2ms(fun([_, {_,{error, unknown_msg}}]) -> true end).
+
+
+3> dbg:tracer().
+{ok,<0.58.0>}
+4> Match1 = dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> true end).
+[{['_',{'_',{error,unknown_msg}}],[],[true]}]
+5> dbg:tp({ets, insert, 2}, Match1).
+{ok,[{matched,nonode@nohost,1},{saved,1}]}
+6> dbg:p(all,[c]).
+{ok,[{matched,nonode@nohost,25}]}
+7> dp:fill().
+true
+(<0.54.0>) call ets:insert(msgQ,{2,{error,unknown_msg}})
+
+так мы узнаем Pid процесса, которые вызвал ets:insert(msgQ,{2,{error,unknown_msg}})
+
+
+generate an event that contains information about the caller
+function. We do this by making our fun return one of a set of
+predefined literal functions, all of which are also handled by the
+precompiler. In our case, we would use message(caller())
+
+dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> message(caller()) end).
+
+(<0.34.0>) call ets:insert(msgQ,{2,{error,unknown_msg}}) ({dp,handle_msg,1})
+
+
+dbg:fun2ms(fun([Id, Sender, Msg]) when Id /=1, Id /=2 -> true end).
+
+TODO: нужно придумать и показать свой случай отладки на несколько функций вглубь.
+
+return_trace()
+Generates an extra event upon completing the traced call, including the return
+value of the function.
+
+exception_trace()
+Behaves in the same way as return_trace , but if a runtime error occurs, an
+exception_from message is generated.
+
+display(Data)
+Generates a side effect by printing the Data passed to it. The Data can be either one
+of the arguments bound in the fun head or the return value of one of the other
+literal functions described in this section.
+
+message(Data)
+Generates a trace event with the Data . The Data can be either one of the arguments
+bound in the fun or the return value of one of the other literal functions described
+in this section
+
+caller()
+Returns the {Module, Function, Arity} tuple, allowing you to identify the calling
+function.
+
+process_dump()
+Returns the process stack properly formatted as a string in the form of a binary.
+You can pass it as an argument to message/1 , where you have implemented your
+own tracer process. Passing it to display/1 will not work, as it is unable to print
+binaries.
+
+self()
+Returns the process identifier of the calling process
+
+
+** sys
+
+http://www.erlang.org/doc/man/sys.html
+
+When processes in question are OTP processes (most of the processes in a production
+system should definitely be OTP processes), you instantly win more tools to inspect them.
+
+• logging of all messages and state transitions, both to the shell or to a file, or even in
+an internal buffer to be queried;
+• statistics (reductions, message counts, time, and so on);
+• fetching the status of a process (metadata including the state);
+• fetching the state of a process (as in the #state{} record);
+• replacing that state
+• custom debugging functions to be used as callbacks
+
+It suffers a bit in production because it doesn’t redirect IO to remote shells, and doesn’t
+have rate-limiting capabilities for trace messages.
+
+
+** recon
+
+http://ferd.github.io/recon/recon_trace.html
+
+recon_trace is recon’s take on tracing. The objective was to allow the same levels
+of safety as with redbug, but without the dependencies. The interface is different,
+and the rate-limiting options aren’t entirely identical. It can also only trace function
+calls, and not messages.
+
+Messages may be supported in future iterations of the library. In practice, the author hasn’t found
+the need when using OTP, given behaviours and matching on specific arguments allows to get something
+roughly equivalent.
+
+Recon, by default, will match all processes.
+
+trace pattern:
+The most basic form is {Mod, Fun, Arity},
+A fancier form will be to replace the arity by a function to match on lists of arguments.
+
+Чего нет в dbg:
+It will also be possible to rate limit based on two manners: a static count, or a number
+of matches per time interval.
+
+In doubt, start with the most restrictive tracing possible, with low limits, and progres-
+sively increase your scope.
