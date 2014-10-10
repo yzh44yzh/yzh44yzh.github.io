@@ -1,3 +1,10 @@
+TODO:
+- перечитать
+- spell check
+- проверить ссылки
+- опубликовать
+
+
 * Отладка средствами trace/dbg/sys
 
 Уж так устроена жизнь программиста, что в ней есть не только веселый и
@@ -71,8 +78,7 @@ http://www.erlang.org/doc/man/erlang.html#trace-3
 *FlagList* указывает, какие события на этих процессах мы хотим трассировать.
 
 PidSpec имеет варианты:
-- Pid процесса в разных формах (собственно Pid, кортеж {N, N, N}, строка "<N.N.N>");
-- имя, под которым процесс зарегистрирован;
+- Pid процесса
 - атомы: existing, new, all;
 
 *existing* -- трассировать имеющиеся процессы, игнорировать новые, которые создаются уже после того,
@@ -193,8 +199,10 @@ dbg:p/2, dbg:p/3, dbg:tp/2 и т.д. Все они обертки, задающ�
 
 *** dbg:p(PidSpec, FlagLists) -> {ok, MatchDesc} | {error, term()}
 
-PidSpec такой же, как в erlang:trace. То есть, Pid процесса в разных видах,
-имя процесса, или атомы: all, new, existing.
+PidSpec имеет варианты:
+- Pid процесса в разных формах (собственно Pid, кортеж {N, N, N}, строка "<N.N.N>");
+- имя, под которым процесс зарегистрирован;
+- атомы: existing, new, all;
 
 FlagLists принимает аналогичные значения, как в erlang:trace, но в лаконичном виде:
 - *s* (send), *r* (received), *m* (message = send + receive)
@@ -333,142 +341,166 @@ dbg:trace_client(ip, Arg, {HandlerFun, Data})
 Мощный, но сложный инструмент. Это аргумент для *erlang:trace_pattern* или *dbg:tp*,
 позволяющий трассировать функцию не при каждом ее вызове, а в зависимости от ее аргументов.
 
-match specification consists of an Erlang term describing a small pro-
-gram that expresses a condition to be matched over a set of arguments
+Match Specification -- это DSL, миниязык внутри Erlang,
+использующийся в *trace_pattern* и в *ets:select*.
 
-they mainly deal with the filtering and manipulation of trace events
+http://www.erlang.org/doc/apps/erts/match_spec.html
 
-If they match successfully, a trace
-event is generated and some predefined actions can be executed
+Сам по себе имеет не очень читаемый синтаксис. К счастью, есть удобная обертка.
 
-Match specifications
-are compiled to a format close to the one used by the emulator, making them more
-efficient than functions
+*dbg:fun2ms(LiteralFun) -> MatchSpec*
 
-the specifications are
-complex to write, and at first glance, they look incomprehensible
+Так можно написать некий литерал, похожий на локальную функцию,
+который преобразуется в настоящий MatchSpec.
 
-you can generate match specifications covering a majority of simple but useful
-cases using the dbg:fun2ms/1 call
-much easier to read, write, modify, and debug
+Например, мы хотим трассировать функцию только если вторым аргументом приходит
+кортеж, тегированный атомом error. Вот такой: *{error, Msg}*
 
-using dbg:fun2ms/1 to turn an anonymous fun into a match specification, which is
-used when setting trace flags on local and global calls
+Литерал мы напишем так:
 
-The function dbg:fun2ms/1 takes a literal fun as an argument and returns a match spec-
-ification describing the properties in the fun.
+fun([_, {error, _}]) -> true end
 
-By “literal fun,” we mean a fun that is
-typed in and passed as a parameter, not a fun that is bound to a variable which is then
-passed as an argument, or a fun that results from applying a higher-order function.
+Из него получим MatchSpec
 
-handled by the precompiler
+dbg:fun2ms(fun([_, {error, _}]) -> true end).
+[{['_',{error,'_'}],[],[true]}]
 
-dbg:fun2ms(fun([_, {_,{error, unknown_msg}}]) -> true end).
+(Вот как он выглядит :)
 
+И дальше используем его для трассировки:
 
-3> dbg:tracer().
-{ok,<0.58.0>}
-4> Match1 = dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> true end).
-[{['_',{'_',{error,unknown_msg}}],[],[true]}]
-5> dbg:tp({ets, insert, 2}, Match1).
-{ok,[{matched,nonode@nohost,1},{saved,1}]}
-6> dbg:p(all,[c]).
-{ok,[{matched,nonode@nohost,25}]}
-7> dp:fill().
-true
-(<0.54.0>) call ets:insert(msgQ,{2,{error,unknown_msg}})
+MatchSpec = dbg:fun2ms(fun([_, {error, _}]) -> true end),
+dbg:tp(my_module, my_function, MatchSpec)
 
-так мы узнаем Pid процесса, которые вызвал ets:insert(msgQ,{2,{error,unknown_msg}})
+То есть, просто матчить входящие аргументы на какие-то конкретные значения не сложно.
 
+Кстати, эти аргументы еще можно ограничивать гардами:
 
-generate an event that contains information about the caller
-function. We do this by making our fun return one of a set of
-predefined literal functions, all of which are also handled by the
-precompiler. In our case, we would use message(caller())
+fun([Counter, {error, _}]) when Counter > 10 ->
+    true
+end
 
-dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> message(caller()) end).
+Но MatchSpec умеет больше. В теле *LiteralFun* можно добавлять специальные конструкции,
+которые выглядят как вызовы функций. Они будут генерировать дополнительные события.
 
-(<0.34.0>) call ets:insert(msgQ,{2,{error,unknown_msg}}) ({dp,handle_msg,1})
+*return_trace()*
+
+fun([_, {error, _}]) ->
+    return_trace(),
+    true
+end
+
+Генерирует событие со значением, возвращаемым из трассируемой функции.
 
 
-dbg:fun2ms(fun([Id, Sender, Msg]) when Id /=1, Id /=2 -> true end).
+*exception_trace()*
 
-TODO: нужно придумать и показать свой случай отладки на несколько функций вглубь.
+fun([_, {error, _}]) ->
+    exception_trace(),
+    true
+end
 
-return_trace()
-Generates an extra event upon completing the traced call, including the return
-value of the function.
+Если при выполнении трассируемой функции возникает исключение,
+генерирует событие, содержашее инфу о нем.
 
-exception_trace()
-Behaves in the same way as return_trace , but if a runtime error occurs, an
-exception_from message is generated.
 
-display(Data)
-Generates a side effect by printing the Data passed to it. The Data can be either one
-of the arguments bound in the fun head or the return value of one of the other
-literal functions described in this section.
+*display(Data)*
 
-message(Data)
-Generates a trace event with the Data . The Data can be either one of the arguments
-bound in the fun or the return value of one of the other literal functions described
-in this section
+fun([_, {error, Msg}]) ->
+    display(Msg),
+    true
+end
 
-caller()
-Returns the {Module, Function, Arity} tuple, allowing you to identify the calling
-function.
+Дает побочный эффект, вывод *Msg* на консоль.
 
-process_dump()
-Returns the process stack properly formatted as a string in the form of a binary.
-You can pass it as an argument to message/1 , where you have implemented your
-own tracer process. Passing it to display/1 will not work, as it is unable to print
-binaries.
 
-self()
-Returns the process identifier of the calling process
+*message(Data)*
+
+fun([_, {error, Msg}]) ->
+    message(Msg),
+    true
+end
+
+Генерирует событие, содержащее значение *Msg*.
+
+
+*caller()*
+
+fun([_, {error, _}]) ->
+    message(caller()),
+    true
+end
+
+Позволяет узнать, откуда была вызвана трассируемая функция.
+Возвращает кортеж {Module, Function, Arity},
+который можно передать в событии с помощью message()
+
+
+*process_dump()*
+
+fun([_, {error, _}]) ->
+    message(process_dump()),
+    true
+end
+
+Возвращает стэк процесса, форматированный в строку.
+
+
+*self()*
+
+fun([_, {error, _}]) ->
+    message(self()),
+    true
+end
+
+Возвращает Pid процесса, в котором выполняется трассируемая функция.
+
+Есть еще несколько таких псевдо-функций, см документацию.
 
 
 ** sys
 
 http://www.erlang.org/doc/man/sys.html
 
-When processes in question are OTP processes (most of the processes in a production
-system should definitely be OTP processes), you instantly win more tools to inspect them.
+Про этот модуль я упоминал раньше, когда рассказывал про gen_server
+http://yzh44yzh.by/post/gen_server.html#sec-4
+Тут кратко повторюсь.
 
-• logging of all messages and state transitions, both to the shell or to a file, or even in
-an internal buffer to be queried;
-• statistics (reductions, message counts, time, and so on);
-• fetching the status of a process (metadata including the state);
-• fetching the state of a process (as in the #state{} record);
-• replacing that state
-• custom debugging functions to be used as callbacks
+Этот модуль дает дополнительные средства отладки для процессов, которые являются
+OTP-процессами (запускаются супервизором в рамках OTP-приложения).
 
-It suffers a bit in production because it doesn’t redirect IO to remote shells, and doesn’t
-have rate-limiting capabilities for trace messages.
+Можно просматривать все сообщения, которые проходят через gen_server, и как
+при этом меняется его состояние. Можно посмотреть статистику работы процесса:
+время старта, к-во сообщений полученных и отправленных, инфа от планировщика.
+Можно получить, и даже заменить состояние процесса.
+
+Вся информация выводится на консоль. Ее можно направить в файл, но не в
+кастомную функцию, и не в сокет.
 
 
 ** recon
 
-http://ferd.github.io/recon/recon_trace.html
+У Фреда Хеберта есть проект [[http://ferd.github.io/recon/][recon]], дающий инструменты для мониторинга и диагностики
+продакшен нод. Я думаю, мы про этот проект еще поговорим :)
 
-recon_trace is recon’s take on tracing. The objective was to allow the same levels
-of safety as with redbug, but without the dependencies. The interface is different,
-and the rate-limiting options aren’t entirely identical. It can also only trace function
-calls, and not messages.
+А сейчас только про часть этого проекта -- модуль [[http://ferd.github.io/recon/recon_trace.html][recon_trace]].
 
-Messages may be supported in future iterations of the library. In practice, the author hasn’t found
-the need when using OTP, given behaviours and matching on specific arguments allows to get something
-roughly equivalent.
+Это обертка над *dbg*, дающая некоторые важные фичи.
+И самая важная среди них -- безопасность отладки.
 
-Recon, by default, will match all processes.
+*recon_trace* ограничивает число обрабатываемых событий трассировки, и
+позволяет избежать больших нагрузок на *io*.
+Можно задавать либо просто лимит получаемых сообщений, либо лимит в еденицу времени.
+tracing process связан с процессом консоли, так что при закрытии консоли
+трассировка отключается автоматически. То же самое происходит при удаленной
+отладке при потере связи с нодой.
 
-trace pattern:
-The most basic form is {Mod, Fun, Arity},
-A fancier form will be to replace the arity by a function to match on lists of arguments.
+*recon_trace* еще больше упрощает интерфейс отладки. Здесь нет необходимости
+вызвать пару *dbg:p / dbp:tpl* (*erlang:trace / erlang:trace_pattern*).
+Достаточно указать только trace_pattern, и трассировка по умолчанию запускается
+для всех процессов. Но можно явно указать процессы, если это нужно.
 
-Чего нет в dbg:
-It will also be possible to rate limit based on two manners: a static count, or a number
-of matches per time interval.
-
-In doubt, start with the most restrictive tracing possible, with low limits, and progres-
-sively increase your scope.
+Библиотека концентрируется на отладке функций, и пока не поддерживает
+отладку сообщений. Второе не так важно для OTP-приложений, где
+сообщения сводятся к вызовам функций *gen_server:call/cast* и
+*gen_server:handle_call/handle_cast*.
