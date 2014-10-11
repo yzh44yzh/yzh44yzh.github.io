@@ -1,0 +1,929 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Отладка средствами trace/dbg/sys</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+<h1>Отладка средствами trace/dbg/sys</h1>
+<p><i>11 октября 2014</i><p>
+
+<div id="table-of-contents">
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#sec-1-1">erlang:trace, erlang:trace_pattern</a>
+<li><a href="#sec-1-2">dbg</a>
+<li><a href="#sec-1-3">Перенаправление событий трассировки</a>
+<li><a href="#sec-1-4">Match Specifications</a></li>
+<li><a href="#sec-1-5">sys</a></li>
+<li><a href="#sec-1-6">recon</a></li>
+</ul>
+</div>
+</div>
+
+
+<div id="outline-container-sec-1" class="outline-2">
+<div class="outline-text-2" id="text-1">
+<p>
+Уж так устроена жизнь программиста, что в ней есть не только веселый и
+интересный процесс написания нового кода, но и скучный, нудный процесс
+отладки написанного.
+</p>
+
+<p>
+И какие найдутся для этого средства? Да много их:
+</p>
+<ul class="org-ul">
+<li>отладка через логи в консоль или файл;
+</li>
+<li>debugger;
+</li>
+<li>trace/dbg;
+</li>
+<li>sys;
+</li>
+<li>библиотеки-обертки над все этим от третьих сторон.
+</li>
+</ul>
+
+<p>
+Полагаю, что многие, как и я сам, хорошо знакомы с отладкой через
+логи.  <b>lager</b>, <b>io:format</b> (вероятно обернутый в макрос или функцию)
+&#x2013; вот они, друзья программиста :)
+</p>
+
+<p>
+Такая отладка понятна, но не всегда удобна. Особенно в продакшн, где
+по логам затруднительно наблюдать происходящее в реальном времени, а
+приходится изучать постфактум. Ну об этом рассказывать не буду.
+</p>
+
+<p>
+Имеется графический отладчик, <a href="http://www.erlang.org/doc/apps/debugger/debugger_chapter.html">debugger</a>. Он менее известен.
+Я вот и не пользовался ни разу. Но кому-то, наверное, полезен :)
+</p>
+
+<p>
+Про debugger надо сказать, что он отлаживает один процесс, а в это
+время остальные процессы живут своей жизнью. И, вероятно, пытаются
+взаимодействовать с отлаживаемым процессом. Посылают сообщения,
+ждут ответа. А отлаживаемый процесс как раз остановлен брейкпоинтом.
+</p>
+
+<p>
+Понятно, что возможны всякие побочные эффекты, истекания таймаутов и т.д.
+И понятно, что его не применишь в продакшен ноде.
+</p>
+
+<p>
+Все это в том или ином виде есть в большинстве языков. А Erlang, кроме этого,
+предлагает свои инструменты. Причем встроенные на самом низком уровне,
+с низким влиянием на работу системы (с некоторыми оговорками),
+и применимую для отладки в реальном времени на продакшене. Об этом и поговорим.
+</p>
+
+<p>
+Тулы эти мощные, но довольно сложные в освоении. Конечно, есть документация.
+Но лучше начать с более простых источников:
+</p>
+
+<p>
+<b>trace/dbg</b> неплохо описаны в 17-й главе <a href="http://www.amazon.com/Erlang-Programming-Francesco-Cesarini/dp/0596518188">"Erlang Programming" Francesco Cesarini</a>
+и в 9-й главе <a href="http://www.erlang-in-anger.com/">"Stuff Goes Bad. Erlang in Anger" Fred Hebert</a>.
+</p>
+
+<p>
+У Цезарини более подробно и обстоятельно. У Фреда кратко и больше про <b>recon</b> &#x2013;
+его тулзу для мониторинга системы, и <b>recon_trace</b> &#x2013; обертку над dbg, кое-что
+упрощающую и кое-что полезное добавляющую.
+</p>
+</div>
+
+
+<div id="outline-container-sec-1-1" class="outline-3">
+<h3 id="sec-1-1">erlang:trace, erlang:trace_pattern</h3>
+<div class="outline-text-3" id="text-1-1">
+<p>
+Функции модуля <b>erlang</b>, низкоуровневый инструмент, который является основанием для других,
+более удобных тулов. Присутствует в языке с первой версии.
+</p>
+
+<p>
+Сами эти функции и работающий поверх них dbg на производительность влияют мало.
+Но при трассировке могут генерироваться очень большое количество событий.
+И если все они направляются на консоль, то во-первых, нагрузят io, и этим таки
+повлияют на систему. Во-вторых, сделают невозможным ввод с консоли.
+</p>
+
+<p>
+Так что нужно быть осторожным, выбирая параметры трассировки. И использовать
+более грамотные обертки, как <b>recon_trace</b> Фреда Хеберта.
+</p>
+</div>
+
+
+<div id="outline-container-sec-1-1-1" class="outline-4">
+<h4 id="sec-1-1-1">erlang:trace(PidSpec, How, FlagList) -&gt; integer()</h4>
+<div class="outline-text-4" id="text-1-1-1">
+<p>
+<a href="http://www.erlang.org/doc/man/erlang.html#trace-3">http://www.erlang.org/doc/man/erlang.html#trace-3</a>
+</p>
+
+<p>
+У функции 3 аргумента.
+</p>
+
+<p>
+<b>PidSpec</b> указывает, какие процессы мы хотим трассировать.
+<b>How</b> это флаг, включающий или выключающий трассировку.
+<b>FlagList</b> указывает, какие события на этих процессах мы хотим трассировать.
+</p>
+
+<p>
+PidSpec имеет варианты:
+</p>
+<ul class="org-ul">
+<li>Pid процесса
+</li>
+<li>атомы: existing, new, all;
+</li>
+</ul>
+
+<p>
+<b>existing</b> &#x2013; трассировать имеющиеся процессы, игнорировать новые, которые создаются уже после того,
+как трассировка включена.
+<b>new</b> &#x2013; наоборот, игнорировать имеющиеся процессы, трассировать новые.
+<b>all</b> &#x2013; трассировать все процессы.
+</p>
+
+<p>
+<b>FlagList</b> имеет много вариантов. Рассмотрим некоторые.
+</p>
+
+<ul class="org-ul">
+<li>send, 'receive' &#x2013; трассировать отправку/получение сообщений
+</li>
+<li>procs &#x2013; трассировать события жизненного цикла процесса и связи между процессами:
+spawn, exit,
+link, unlink, getting_linked, getting_unlinked,
+register, unregister
+</li>
+<li>call &#x2013; трассировать вызовы функций (подробности ниже)
+</li>
+<li>running &#x2013; трассировать работу планировщика процессов
+</li>
+<li>garbage_collection &#x2013; трассировать сборку мусора
+</li>
+</ul>
+
+<p>
+Когда включена трассировка, генерируются специальные сообщения вида:<br/>
+{trace, Pid, EventTag, Data1 [,Data2]}
+</p>
+
+<p>
+Например:<br/>
+{trace, Pid, 'receive', Msg} - процесс Pid получил сообщение Msg<br/>
+{trace, Pid, send, Msg, To} - процесс Pid отправил сообщение Msg процессу To<br/>
+{trace, Pid, call, {M, F, Args}} - процесс Pid начал выполнение функции {M, F, Args}<br/>
+и т.д.
+</p>
+
+<p>
+Кто получает эти сообщения? По умолчанию тот процесс, который вызвал <b>erlang:trace</b>.
+Но можно при вызове указать в FlagList аргумент {tracer, Pid}, и сделать получателем
+сообщений какой-нибудь другой процесс.
+</p>
+
+<p>
+Процесс-получатель называется <b>tracer process</b>, и он может быть только один.
+По понятным причинам, для него самого трассировку включить нельзя.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-1-2" class="outline-4">
+<h4 id="sec-1-1-2">erlang:trace_pattern(MFA, MatchSpec, FlagList) -&gt; integer()</h4>
+<div class="outline-text-4" id="text-1-1-2">
+<p>
+<a href="http://www.erlang.org/doc/man/erlang.html#trace_pattern-3">http://www.erlang.org/doc/man/erlang.html#trace_pattern-3</a>
+</p>
+
+<p>
+Итак, мы теперь можем выбрать, какие процессы хотим трассировать.
+Но обычно нам интересно наблюдать вызовы функций, аргументы
+и возвращаемые значения.
+</p>
+
+<p>
+Для этого нужно вызвать еще и erlang:trace_pattern/3.
+</p>
+
+<p>
+И мы будем получать события трассировки, когда заданные в <b>erlang:trace</b>
+процессы будут вызывать заданные в <b>erlang:trace_pattern</b> функции.
+</p>
+
+<p>
+Тут аргументы посложнее :)
+</p>
+
+<p>
+Первый аргумент MFA указывает функцию, которую мы хотим трассировать.
+Это кортеж <b>{Module, Function, Arity}</b>, который однозначно указывает
+функцию. Но он допускает wildcards, и так может указывать на несколько
+функций:
+<ul>
+<li>{Module, Function, '_'} &#x2013; все функции с таким именем и любым Arity;</li>
+<li>{Module, '_', '_'} &#x2013; все функции данного модуля;</li>
+<li>{'_', '_', '_'} &#x2013; вообще все функции.</li>
+</ul>
+</p>
+
+<p>
+Второй аргумент, MatchSpec, сложнее.
+</p>
+
+<p>
+Во-первых, он используется для включения-выключения трассировки (как и в erlang:trace)
+если задать значения true/false.
+</p>
+
+<p>
+Во-вторых, может управлять счетчиками вызовов функций,
+и счетчиками времени выполнения функций. Подробности в документации.
+</p>
+
+<p>
+И, наконец, можно задать собственно <b>match specification</b>, чтобы
+событие трассировки генерировалось не для любого вызова функции,
+а в зависимости от аргументов. Подробности ниже.
+</p>
+
+<p>
+Третий аргумент, TraceFlags, добавляет еще некоторые опции:
+<ul>
+<li>global &#x2013; трассировать только глобальные вызовы;</li>
+<li>local &#x2013; трассировать любые вызовы (и глобальные и локальные)</li>
+<li>call_count &#x2013; включает счетчик вызовов функции;</li>
+<li>call_time &#x2013; добавляет время выполнения функции в событие трассировки.</li>
+</ul>
+</p>
+
+<p>
+Глобальный вызов, это вызов экспортированной функции с указанием модуля:<br/>
+my_module:my_func(Arg).
+</p>
+
+<p>
+А вот это локальный вызов:<br/>
+my_func(Arg).
+</p>
+
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-1-2" class="outline-3">
+<h3 id="sec-1-2">dbg</h3>
+<div class="outline-text-3" id="text-1-2">
+<p>
+Как видно, <b>erlang:trace</b> и <b>erlang:trace_pattern</b> хоть и мощные, но не удобные
+в использовании. Придется печатать много букв в консоли, чтобы управлять трассировкой
+с их помощью. Модуль <b>dbg</b> делает такое управление более удобным и лаконичным.
+</p>
+
+<p>
+<a href="http://www.erlang.org/doc/man/dbg.html">http://www.erlang.org/doc/man/dbg.html</a>
+</p>
+
+<p>
+У Цезарини читаем:
+</p>
+
+<blockquote><p>
+Small impact on system performance, making it a suitable candidate for
+tracing large live systems.
+</p></blockquote>
+
+<p>
+У Хеберта читаем:
+</p>
+
+<blockquote></p>
+Its interface is a bit clunky in terms of usability, but it’s entirely
+good enough to do what you need. The problem with it is that you have
+to know what you’re doing, because dbg can log absolutely everything
+on the node and kill one in under two seconds.
+</p></blockquote>
+
+<p>
+Так что трейсить большие продакшен системы конечно можно, и нужно. Но с осторожностью :)
+</p>
+
+<p>
+В документации мы видим целую пачку функций с короткими непонятными названиями:
+dbg:p/2, dbg:p/3, dbg:tp/2 и т.д. Все они обертки, задающие те или иные аргументы
+для erlang:trace, erlang:trace_pattern. А короткие они для того, чтобы их быстро
+набирать в консоли.
+</p>
+
+<p>
+Рассмотрим некоторые из них.
+</p>
+</div>
+
+<div id="outline-container-sec-1-2-1" class="outline-4">
+<h4 id="sec-1-2-1">dbg:p(PidSpec, FlagLists) -&gt; {ok, MatchDesc} | {error, term()}</h4>
+<div class="outline-text-4" id="text-1-2-1">
+<p>
+PidSpec имеет варианты:
+</p>
+<ul class="org-ul">
+<li>Pid процесса в разных формах (собственно Pid, кортеж {N, N, N}, строка "&lt;N.N.N&gt;");
+</li>
+<li>имя, под которым процесс зарегистрирован;
+</li>
+<li>атомы: existing, new, all;
+</li>
+</ul>
+
+<p>
+FlagLists принимает аналогичные значения, как в erlang:trace, но в лаконичном виде:
+</p>
+<ul class="org-ul">
+<li><b>s</b> (send), <b>r</b> (received), <b>m</b> (message = send + receive)
+</li>
+<li><b>p</b> (procs) события spawn, exit, link, unlink, getting_linked, getting_unlinked, register, unregister
+</li>
+<li><b>c</b> (call)
+</li>
+</ul>
+
+<p>
+Таким образом вызов:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:p({0.55.0}, m)
+</pre>
+</div>
+
+<p>
+аналогичен вызову:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">erlang:trace({0.55.0}, [true], [send, 'receive'])
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-sec-1-2-2" class="outline-4">
+<h4 id="sec-1-2-2">dbg:c(Mod, Fun, Args, FlagList)</h4>
+<div class="outline-text-4" id="text-1-2-2">
+<p>
+Оберкта для <b>erlang:trace_pattern</b>, выполняет:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">erlang:trace_pattern({Mod, Fun, Args}, true, FlagList),
+apply(Mod, Fun, Args),
+</pre>
+</div>
+
+<p>
+То есть, задает trace_pattern для функции, и тут же ее вызывает.
+Удобный способ, чтобы быстро отладить конкретную функцию.
+</p>
+
+<p>
+Причем вызов <b>dbg:c</b> должен идти в паре с вызовом <b>dbg:p</b>,
+так же, как в паре идут <b>erlang:trace</b> и <b>erlang:trace_pattern</b>
+</p>
+
+<p>
+Есть вариант <b>dbg:c(Mod, Fun, Args)</b>, без указания FlagList. В этом случае
+автоматически устанавливаются все флаги.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-2-3" class="outline-4">
+<h4 id="sec-1-2-3">dbg:tp/2,3,4, dbg:tpl/2,3,4</h4>
+<div class="outline-text-4" id="text-1-2-3">
+<p>
+Тоже обертка для <b>erlang:trace_pattern</b>, в нескольких вариантах. Позволяет задать MatchSpec.
+</p>
+
+<p>
+<b>dbg:tp</b> ставит флаг global, и трассирует глобальные вызовы.
+<b>dbg:tpl</b> ставит флаг local, и трассирует все вызовы.
+</p>
+
+<p>
+Аргументы:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tp(Module, MatchSpec)
+// тоже самое, что
+erlang:trace_pattern({Module, '_', '_'}, MatchSpec, [])
+</pre>
+</div>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tp(Module, Function, MatchSpec)
+// тоже самое, что
+erlang:trace_pattern({Module, Function, '_'}, MatchSpec, [])
+</pre>
+</div>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tp(Module, Function, Arity, MatchSpec)
+//тоже самое, что
+erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-sec-1-2-4" class="outline-4">
+<h4 id="sec-1-2-4">dbg:ctp/0,1,2,3, dbg:ctpg/0,1,2,3, dbg:ctpl/0,1,2,3</h4>
+<div class="outline-text-4" id="text-1-2-4">
+<p>
+Эти функции останавливают трассировку, запущенную предыдущими функциями:
+</p>
+<ul class="org-ul">
+<li>dbg:ctpg останавливает, если запущено через dbg:tp
+</li>
+<li>dbg:ctpl останавливает, если запущено через dbg:tpl
+</li>
+<li>dbg:ctp останавливает, неважно как запущено
+</li>
+</ul>
+
+<p>
+Да, с остановкой трассировки намудрили. Мало того, что нужно совпадать по аргументам,
+так еще нужно помнить, какой функцией трассировка запускалась :)
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-2-5" class="outline-4">
+<h4 id="sec-1-2-5">dbg:stop/0, dbg:stop_clean/0</h4>
+<div class="outline-text-4" id="text-1-2-5">
+<p>
+Вышеуказанные функции останавливают трассировку, но не отменяют установленные флаги.
+</p>
+
+<p>
+<b>dbg:stop</b> останавливает все трассировки, сбрасывает все флаги, закрывает порты
+(если был редирект событий трассировки в порты). Но не сбрасывает MatchSpec.
+То есть, отменяет <b>erlang:trace</b> но не отменяет <b>erlang:trace_pattern</b>
+</p>
+
+<p>
+<b>dbg:stop_clear</b> тоже самое, плюс отменяет <b>erlang:trace_pattern</b>
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-1-3" class="outline-3">
+<h3 id="sec-1-3">Перенаправление событий трассировки</h3>
+<div class="outline-text-3" id="text-1-3">
+<p>
+По умолчанию события трассировки получает <b>tracer process</b>. Он их форматирует и выводит на консоль.
+Но их можно перенаправить в кастомную функцию, в файл, или на другую ноду.
+</p>
+</div>
+
+<div id="outline-container-sec-1-3-1" class="outline-4">
+<h4 id="sec-1-3-1">В кастомную функцию</h4>
+<div class="outline-text-4" id="text-1-3-1">
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tracer(process , {HandlerFun, Data})
+</pre>
+</div>
+
+<p>
+Так можно задать кастомную функцию. Она должна получать 2 аргумента &#x2013; событие трассировки
+и аккумулятор. Аргумент <b>Data</b> &#x2013; начальное значение аккумулятора. Функция возвращает
+новое значение аккумулятора.
+</p>
+
+<p>
+Таким образом можно организовать накопление некоторых данных в
+аккумуляторе. Что может пригодится, например, для анализа работы
+сборщика мусора, если трассируются события, связанный с его работой.
+</p>
+</div>
+</div>
+<div id="outline-container-sec-1-3-2" class="outline-4">
+<h4 id="sec-1-3-2">В файл</h4>
+<div class="outline-text-4" id="text-1-3-2">
+<p>
+Сперва нужно получить ссылку на port function.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">PortFun = dbg:trace_port(file, FileOptions)
+</pre>
+</div>
+
+<p>
+<b>FileOptions</b> могут быть разными (см документацию).
+Например <b>{FileName, wrap, FileSuffix}</b> задает ротацию в файлах, аналогично, как ротируются логи.
+</p>
+
+<p>
+Затем вызываем
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tracer(port, PortFun)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-sec-1-3-3" class="outline-4">
+<h4 id="sec-1-3-3">На другую ноду</h4>
+<div class="outline-text-4" id="text-1-3-3">
+<p>
+Направить события в порт несколько сложнее. Сперва нужно получить ссылку на port function.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">PortFun = dbg:trace_port(ip, Port)
+</pre>
+</div>
+
+<p>
+Где <b>Port</b> &#x2013; это номер порта или кортеж <b>{PortNumber, QueueSize}</b>.
+</p>
+
+<p>
+Затем вызываем
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:tracer(port, PortFun)
+</pre>
+</div>
+
+<p>
+Опция <b>QueueSize</b> позволяет ограничить количество сообщений, которые хранятся в буфере.
+Это полезно, если клиент не успевает их забирать. Лишние события будут просто игнорироваться.
+</p>
+
+<p>
+На другой ноде нужно вызывать
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:trace_client(ip, Arg, {HandlerFun, Data})
+</pre>
+</div>
+
+<p>
+Где <b>Arg</b> это номер порта или кортеж <b>{HostName, PortNumber}</b>
+</p>
+
+<p>
+Такой клиент будет получать события из порта и обрабатывать их кастомной функцией.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-1-4" class="outline-3">
+<h3 id="sec-1-4">Match Specifications</h3>
+<div class="outline-text-3" id="text-1-4">
+<p>
+Мощный, но сложный инструмент. Это аргумент для <b>erlang:trace_pattern</b> или <b>dbg:tp</b>,
+позволяющий трассировать функцию не при каждом ее вызове, а в зависимости от ее аргументов.
+</p>
+
+<p>
+Match Specification &#x2013; это DSL, миниязык внутри Erlang,
+использующийся в <b>trace_pattern</b> и в <b>ets:select</b>.
+</p>
+
+<p>
+<a href="http://www.erlang.org/doc/apps/erts/match_spec.html">http://www.erlang.org/doc/apps/erts/match_spec.html</a>
+</p>
+
+<p>
+Сам по себе имеет не очень читаемый синтаксис. К счастью, есть удобная обертка.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:fun2ms(LiteralFun) -&gt; MatchSpec
+</pre>
+</div>
+
+<p>
+Так можно написать некий литерал, похожий на локальную функцию,
+который преобразуется в настоящий MatchSpec.
+</p>
+
+<p>
+Например, мы хотим трассировать функцию только если вторым аргументом приходит
+кортеж, тегированный атомом error. Вот такой: <b>{error, Msg}</b>
+</p>
+
+<p>
+Литерал мы напишем так:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt; true end
+</pre>
+</div>
+
+<p>
+Из него получим MatchSpec
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">dbg:fun2ms(fun([_, {error, _}]) -&gt; true end).
+[{['_',{error,'_'}],[],[true]}] // Вот как он выглядит :)
+</pre>
+</div>
+
+<p>
+И дальше используем его для трассировки:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">MatchSpec = dbg:fun2ms(fun([_, {error, _}]) -&gt; true end),
+dbg:tp(my_module, my_function, MatchSpec)
+</pre>
+</div>
+
+<p>
+То есть, просто матчить входящие аргументы на какие-то конкретные значения не сложно.
+</p>
+
+<p>
+Кстати, эти аргументы еще можно ограничивать гардами:
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([Counter, {error, _}]) when Counter &gt; 10 -&gt;
+    true
+end
+</pre>
+</div>
+
+<p>
+Но MatchSpec умеет больше. В теле <b>LiteralFun</b> можно добавлять специальные конструкции,
+которые выглядят как вызовы функций. Они будут генерировать дополнительные события.
+</p>
+
+<p>
+<b>return_trace()</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt;
+    return_trace(),
+    true
+end
+</pre>
+</div>
+<p>
+Генерирует событие со значением, возвращаемым из трассируемой функции.
+</p>
+
+
+<p>
+<b>exception_trace()</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt;
+    exception_trace(),
+    true
+end
+</pre>
+</div>
+<p>
+Если при выполнении трассируемой функции возникает исключение,
+генерирует событие, содержащее инфу о нем.
+</p>
+
+
+<p>
+<b>display(Data)</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, Msg}]) -&gt;
+    display(Msg),
+    true
+end
+</pre>
+</div>
+<p>
+Дает побочный эффект, вывод <b>Msg</b> на консоль.
+</p>
+
+
+<p>
+<b>message(Data)</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, Msg}]) -&gt;
+    message(Msg),
+    true
+end
+</pre>
+</div>
+
+<p>
+Генерирует событие, содержащее значение <b>Msg</b>.
+</p>
+
+
+<p>
+<b>caller()</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt;
+    message(caller()),
+    true
+end
+</pre>
+</div>
+
+<p>
+Позволяет узнать, откуда была вызвана трассируемая функция.
+Возвращает кортеж {Module, Function, Arity},
+который можно передать в событии с помощью message()
+</p>
+
+
+<p>
+<b>process_dump()</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt;
+    message(process_dump()),
+    true
+end
+</pre>
+</div>
+<p>
+Возвращает стэк процесса, форматированный в строку.
+</p>
+
+
+<p>
+<b>self()</b>
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">fun([_, {error, _}]) -&gt;
+    message(self()),
+    true
+end
+</pre>
+</div>
+<p>
+Возвращает Pid процесса, в котором выполняется трассируемая функция.
+</p>
+
+<p>
+Есть еще несколько таких псевдо-функций, см документацию.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-5" class="outline-3">
+<h3 id="sec-1-5">sys</h3>
+<div class="outline-text-3" id="text-1-5">
+<p>
+<a href="http://www.erlang.org/doc/man/sys.html">http://www.erlang.org/doc/man/sys.html</a>
+</p>
+
+<p>
+Про этот модуль я упоминал раньше, когда рассказывал про gen_server
+<a href="http://yzh44yzh.by/post/gen_server.html#sec-4">http://yzh44yzh.by/post/gen_server.html#sec-4</a>
+Тут кратко повторюсь.
+</p>
+
+<p>
+Этот модуль дает дополнительные средства отладки для процессов, которые являются
+OTP-процессами (запускаются супервизором в рамках OTP-приложения).
+</p>
+
+<p>
+Можно просматривать все сообщения, которые проходят через gen_server, и как
+при этом меняется его состояние. Можно посмотреть статистику работы процесса:
+время старта, к-во сообщений полученных и отправленных, инфа от планировщика.
+Можно получить, и даже заменить состояние процесса.
+</p>
+
+<p>
+Вся информация выводится на консоль. Ее можно направить в файл, но не в
+кастомную функцию, и не в сокет.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-1-6" class="outline-3">
+<h3 id="sec-1-6">recon</h3>
+<div class="outline-text-3" id="text-1-6">
+<p>
+У Фреда Хеберта есть проект <a href="http://ferd.github.io/recon/">recon</a>, дающий инструменты для мониторинга и диагностики
+продакшен нод. Я думаю, мы про этот проект еще поговорим :)
+</p>
+
+<p>
+А сейчас только про часть этого проекта &#x2013; модуль <a href="http://ferd.github.io/recon/recon_trace.html">recon_trace</a>.
+</p>
+
+<p>
+Это обертка над <b>dbg</b>, дающая некоторые важные фичи.
+И самая важная среди них &#x2013; безопасность отладки.
+</p>
+
+<p>
+<b>recon_trace</b> ограничивает число обрабатываемых событий трассировки, и
+позволяет избежать больших нагрузок на <b>io</b>.
+Можно задавать либо просто лимит получаемых сообщений, либо лимит в единицу времени.
+tracing process связан с процессом консоли, так что при закрытии консоли
+трассировка отключается автоматически. То же самое происходит при удаленной
+отладке при потере связи с нодой.
+</p>
+
+<p>
+<b>recon_trace</b> еще больше упрощает интерфейс отладки. Здесь нет необходимости
+вызвать пару <b>dbg:p / dbp:tpl</b> (<b>erlang:trace / erlang:trace_pattern</b>).
+Достаточно указать только trace_pattern, и трассировка по умолчанию запускается
+для всех процессов. Но можно явно указать процессы, если это нужно.
+</p>
+
+<p>
+Библиотека концентрируется на отладке функций, и пока не поддерживает
+отладку сообщений. Второе не так важно для OTP-приложений, где
+сообщения сводятся к вызовам функций <b>gen_server:call/cast</b> и
+<b>gen_server:handle_call/handle_cast</b>.
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
