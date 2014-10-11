@@ -136,7 +136,7 @@
 
 
 <div id="outline-container-sec-1-1-1" class="outline-4">
-<p>erlang:trace(PidSpec, How, FlagList) -&gt; integer()</p>
+<p><b>erlang:trace(PidSpec, How, FlagList) -&gt; integer()</b></p>
 <div class="outline-text-4" id="text-1-1-1">
 <p>
 <a href="http://www.erlang.org/doc/man/erlang.html#trace-3">http://www.erlang.org/doc/man/erlang.html#trace-3</a>
@@ -216,7 +216,7 @@ register, unregister
 </div>
 
 <div id="outline-container-sec-1-1-2" class="outline-4">
-<p>erlang:trace_pattern(MFA, MatchSpec, FlagList) -&gt; integer()</p>
+<p><b>erlang:trace_pattern(MFA, MatchSpec, FlagList) -&gt; integer()</b></p>
 <div class="outline-text-4" id="text-1-1-2">
 <p>
 <a href="http://www.erlang.org/doc/man/erlang.html#trace_pattern-3">http://www.erlang.org/doc/man/erlang.html#trace_pattern-3</a>
@@ -347,7 +347,7 @@ dbg:p/2, dbg:p/3, dbg:tp/2 и т.д. Все они обертки, задающ�
 </div>
 
 <div id="outline-container-sec-1-2-1" class="outline-4">
-<h4 id="sec-1-2-1">dbg:p(PidSpec, FlagLists) -&gt; {ok, MatchDesc} | {error, term()}</h4>
+<p><b>dbg:p(PidSpec, FlagLists) -&gt; {ok, MatchDesc} | {error, term()}</b></p>
 <div class="outline-text-4" id="text-1-2-1">
 <p>
 PidSpec имеет варианты:
@@ -395,7 +395,7 @@ FlagLists принимает аналогичные значения, как в 
 </div>
 </div>
 <div id="outline-container-sec-1-2-2" class="outline-4">
-<h4 id="sec-1-2-2">dbg:c(Mod, Fun, Args, FlagList)</h4>
+<p></b>dbg:c(Mod, Fun, Args, FlagList)</b></p>
 <div class="outline-text-4" id="text-1-2-2">
 <p>
 Оберкта для <b>erlang:trace_pattern</b>, выполняет:
@@ -426,7 +426,7 @@ apply(Mod, Fun, Args),
 </div>
 
 <div id="outline-container-sec-1-2-3" class="outline-4">
-<h4 id="sec-1-2-3">dbg:tp/2,3,4, dbg:tpl/2,3,4</h4>
+<p><b>dbg:tp/2,3,4, dbg:tpl/2,3,4</b></p>
 <div class="outline-text-4" id="text-1-2-3">
 <p>
 Тоже обертка для <b>erlang:trace_pattern</b>, в нескольких вариантах. Позволяет задать MatchSpec.
@@ -467,7 +467,7 @@ erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
 </div>
 </div>
 <div id="outline-container-sec-1-2-4" class="outline-4">
-<h4 id="sec-1-2-4">dbg:ctp/0,1,2,3, dbg:ctpg/0,1,2,3, dbg:ctpl/0,1,2,3</h4>
+<p><b>dbg:ctp/0,1,2,3, dbg:ctpg/0,1,2,3, dbg:ctpl/0,1,2,3</b></p>
 <div class="outline-text-4" id="text-1-2-4">
 <p>
 Эти функции останавливают трассировку, запущенную предыдущими функциями:
@@ -489,7 +489,7 @@ erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
 </div>
 
 <div id="outline-container-sec-1-2-5" class="outline-4">
-<h4 id="sec-1-2-5">dbg:stop/0, dbg:stop_clean/0</h4>
+<p><b>dbg:stop/0, dbg:stop_clean/0</b></p>
 <div class="outline-text-4" id="text-1-2-5">
 <p>
 Вышеуказанные функции останавливают трассировку, но не отменяют установленные флаги.
@@ -518,7 +518,7 @@ erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
 </div>
 
 <div id="outline-container-sec-1-3-1" class="outline-4">
-<h4 id="sec-1-3-1">В кастомную функцию</h4>
+<p><b>В кастомную функцию</b></p>
 <div class="outline-text-4" id="text-1-3-1">
 <div class="org-src-container">
 
@@ -540,7 +540,7 @@ erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
 </div>
 </div>
 <div id="outline-container-sec-1-3-2" class="outline-4">
-<h4 id="sec-1-3-2">В файл</h4>
+<p><b>В файл</b></p>
 <div class="outline-text-4" id="text-1-3-2">
 <p>
 Сперва нужно получить ссылку на port function.
@@ -569,7 +569,7 @@ erlang:trace_pattern({Module, Function, Arity}, MatchSpec, [])
 </div>
 </div>
 <div id="outline-container-sec-1-3-3" class="outline-4">
-<h4 id="sec-1-3-3">На другую ноду</h4>
+<p><b>На другую ноду</b></p>
 <div class="outline-text-4" id="text-1-3-3">
 <p>
 Направить события в порт несколько сложнее. Сперва нужно получить ссылку на port function.
