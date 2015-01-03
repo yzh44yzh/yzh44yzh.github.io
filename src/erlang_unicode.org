@@ -1,0 +1,648 @@
+#+OPTIONS: ^:{}
+
+* Unicode в Erlang
+
+C этой темой я выступал на 7-й встрече [[https://www.youtube.com/watch?v=VqmbWElG69U][Belarus Erlang User Group]].
+Но здесь материал более свежий, я доработал в некоторые моменты, недоработанные на момент выступления,
+и более подробный.
+
+* Вступление
+
+Не буду рассказывать общеизвестные вещи и пересказывать документацию,
+однако документация must read, поэтому ссылки даю:
+- [[http://www.erlang.org/doc/apps/stdlib/unicode_usage.html][Using Unicode in Erlang]]
+- [[http://www.erlang.org/doc/man/unicode.html][Модуль unicode]]
+
+И бонусом хорошее видео про Unicode:
+[[https://www.youtube.com/watch?v=MijmeoH9LT4][Characters, Symbols and the Unicode Miracle - Computerphile]]
+
+* Сразу немного практики
+
+Возьмем эрланг двух версий: *R16B03* и *OTP 17.3* (более ранние версии, я полагаю, не актуальны).
+
+Попробуем:
+- R17 и R16;
+- задавать бинарники в консоли и хардкодить их в модуле;
+- запускать erl с флагом +pc и без этого флага.
+
+И посмотрим:
+- что за бинарники получаются;
+- как с ними работает io:format (~w, ~p, ~tp, ~s, ~ts);
+- и что получается после unicode:characters_to_list.
+
+Модуль для теста будет очень простой:
+#+BEGIN_SRC Erlang
+%% -*- coding: utf-8 -*-
+-module(tu).
+-export([bin_default/0, bin_utf8/0, bin_utf16/0, bin_utf32/0, str_default/0,
+         show/1, show_list/1, show_list/2]).
+
+bin_default() -> <<"привет">>.
+bin_utf8() -> <<"привет"/utf8>>.
+bin_utf16() -> <<"привет"/utf16>>.
+bin_utf32() -> <<"привет"/utf32>>.
+str_default() -> "привет".
+
+show(Data) ->
+    io:format(" W:~w~n", [Data]),
+    io:format(" P:~p~n", [Data]),
+    catch io:format(" S:~s~n", [Data]),
+    catch io:format("TS:~ts~n", [Data]),
+    io:format("TP:~tp~n", [Data]),
+    ok.
+
+show_list(Bin) ->
+    show(unicode:characters_to_list(Bin)).
+
+show_list(Bin, Encoding) ->
+    show(unicode:characters_to_list(Bin, Encoding)).
+#+END_SRC
+
+Небольшое теоретическое отступление, что такое [[http://www.erlang.org/doc/man/erl.html][флаг +pc]]:
+
+Суть в том, что в некоторых случаях Erlang применяет эвристику, пытаясь определить,
+является ли данный список строкой, чтобы отобразить его соответствующим образом.
+Если флаг не задан, то эвристика применяется только для строк в *latin1*, а
+если задан, то и для строк в *unicode*. Его действие мы увидим ниже на примерах.
+
+И, пожалуй, стоит пояснить аргументы форматирования [[http://www.erlang.org/doc/man/io.html#fwrite-1][io:format]]:
+- *~w* -- показывает term как есть, без модификаций.
+- *~p* -- применяет эвристику, пытаясь определить, является ли term строкой в latin1.
+- *~tp* -- применяет эвристику, пытаясь определить, является ли term строкой в unicode.
+- *~s* -- показывает term как строку в latin1.
+- *~ts* -- показывает term как строку в unicode.
+
+
+** Запускаем R17 с флагом +pc unicode
+
+#+BEGIN_SRC Erlang
+$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> c(tu).
+{ok,tu}
+
+2> B = <<"привет"/utf8>>.
+<<"привет"/utf8>>
+#+END_SRC
+Бинарник создан в консоли с указанием кодировки utf8. Он отобразился как &lt;&lt;"привет"/utf8&gt;&gt;,
+это сработал флаг +pc unicode.
+
+#+BEGIN_SRC Erlang
+3> tu:show(B).
+ W:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ P:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:<<"привет"/utf8>>
+ok
+#+END_SRC
+Здесь мы видим результаты выполения io:format.
+~w и ~p показывают &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt; -- так и должен выглядеть utf8 побайтно.
+~s показывает какую-то неправильную строку. Это ок, потому что ~s работает только с latin1.
+~ts показывает правильную строку.
+~tp показывает, как сработала эвристка определения строки.
+
+#+BEGIN_SRC Erlang
+4> tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+#+END_SRC
+Здесь мы видим, что получается после unicode:characters_to_list.
+~w и ~p показывают список из unicode code point.
+~s не сработал, упал с исключением.
+~ts и ~tp показывают правильную строку для этого списка.
+
+Итого, с utf8 в R17 все работает ок.
+
+** Если запустить R17 без флага +pc, то
+
+#+BEGIN_SRC Erlang
+yura ~/tmp $ erl
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> B = <<"привет"/utf8>>.
+<<208,191,209,128,208,184,208,178,208,181,209,130>>
+2> l(tu).
+{module,tu}
+3> tu:show(B).
+ W:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ P:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ok
+4> tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:[1087,1088,1080,1074,1077,1090]
+ok
+5>
+#+END_SRC
+
+Значение B теперь отображается в консоли как &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+а не как &lt;&lt;"привет"/utf8&gt;&gt;.
+io:format("~tp", [B]) теперь показывает &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+и [1087,1088,1080,1074,1077,1090] вместо &lt;&lt;"привет"/utf8&gt;&gt; и "привет". Все остальное
+работает так же.
+
+Если мы будем брать бинарник, захардкоженный в коде модуля, а не задавать его в консоли,
+то все равно получим такое же поведение.
+
+#+BEGIN_SRC Erlang
+$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> B = tu:bin_utf8().
+<<"привет"/utf8>>
+
+$ erl
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> B = tu:bin_utf8().
+<<208,191,209,128,208,184,208,178,208,181,209,130>>
+#+END_SRC
+
+
+** R17 и utf16/utf32
+
+Теперь посмотрим, как R17 работает с utf16 и utf32.
+
+#+BEGIN_SRC Erlang
+$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> B1 = <<"привет"/utf16>>.
+<<4,63,4,64,4,56,4,50,4,53,4,66>>
+2> B2 = <<"привет"/utf32>>.
+<<0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66>>
+#+END_SRC
+Тут эвристика не работает, и независимо от флага +pc все равно показывается бинарник.
+
+#+BEGIN_SRC Erlang
+3> tu:show(B1).
+ W:<<4,63,4,64,4,56,4,50,4,53,4,66>>
+ P:<<4,63,4,64,4,56,4,50,4,53,4,66>>
+ S:^D?^D@^D8^D2^D5^DB
+TS:^D?^D@^D8^D2^D5^DB
+TP:<<4,63,4,64,4,56,4,50,4,53,4,66>>
+ok
+4> tu:show(B2).
+ W:<<0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66>>
+ P:<<0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66>>
+ S:^@^@^D?^@^@^D@^@^@^D8^@^@^D2^@^@^D5^@^@^DB
+TS:^@^@^D?^@^@^D@^@^@^D8^@^@^D2^@^@^D5^@^@^DB
+TP:<<0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66>>
+ok
+#+END_SRC
+io:format не может показать этот бинарник как строку, что понятно.
+
+#+BEGIN_SRC Erlang
+5> tu:show_list(B1, utf16).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+6> tu:show_list(B2, utf32).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+#+END_SRC
+Здесь нужен unicode:characters_to_list/2. И если кодировка указана правильно, то все ок.
+
+И здесь тоже бинарник, захардкоженный в коде модуля, дает такое же поведение,
+как и бинарник, заданный в консоли.
+
+
+** R17 и бинарник без указания кодировки
+
+Здесь интересная ситуация.
+
+#+BEGIN_SRC Erlang
+yura ~/tmp $ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1> B = <<"привет">>.
+<<"?@825B">>
+#+END_SRC
+Значение показано как строка, но неправильно.
+
+#+BEGIN_SRC Erlang
+2> tu:show(B).
+ W:<<63,64,56,50,53,66>>
+ P:<<"?@825B">>
+ S:?@825B
+TS:?@825B
+TP:<<"?@825B">>
+ok
+#+END_SRC
+Видно, что в бинарнике по одному байту на символ. И это те байты, которые в utf16/utf32 стоят во 2-й/4-й позициях.
+То есть, это несуществующая кодировка utf4 :)
+
+#+BEGIN_SRC Erlang
+4> tu:show_list(B, utf8).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+5> tu:show_list(B, utf16).
+ W:[16192,14386,13634]
+ P:[16192,14386,13634]
+TS:㽀㠲㕂
+TP:"㽀㠲㕂"
+ok
+6> tu:show_list(B, utf32).
+ W:{error,[],<<63,64,56,50,53,66>>}
+ P:{error,[],<<"?@825B">>}
+TP:{error,[],<<"?@825B">>}
+ok
+7> tu:show_list(B, unicode).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+8> tu:show_list(B, latin1).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+#+END_SRC
+
+Попытки преобразовать этот бинарник с помощью
+unicode:characters_to_list с указанием разных кодировок правильного
+результата не дают.
+
+
+** R16
+
+Если вы не забыли указать
+#+BEGIN_SRC Erlang
+%% -*- coding: utf-8 -*-
+#+END_SRC
+в первой строке модуля, то в R16 все будет работать так же, как в R17.
+А если забыли, то поведение для захардкоженных в модуле бинарников будет отличаться.
+
+Бинарник без указания кодировки будет рассматриваться как бинарник в utf8:
+#+BEGIN_SRC Erlang
+yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V5.10.4  (abort with ^G)
+1> c(tu).
+{ok,tu}
+2> B = tu:bin_default().
+<<"привет"/utf8>>
+3> tu:show(B).
+ W:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ P:<<208,191,209,128,208,184,208,178,208,181,209,130>>
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:<<"привет"/utf8>>
+ok
+4> tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+#+END_SRC
+
+А бинарники с указанием кодировки будут работать неправильно:
+#+BEGIN_SRC Erlang
+yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V5.10.4  (abort with ^G)
+1> B8 = tu:bin_utf8().
+<<195,144,194,191,195,145,194,128,195,144,194,184,195,144,
+  194,178,195,144,194,181,195,145,194,130>>
+2> B16 = tu:bin_utf16().
+<<0,208,0,191,0,209,0,128,0,208,0,184,0,208,0,178,0,208,0,
+  181,0,209,0,130>>
+3> B32 = tu:bin_utf32().
+<<0,0,0,208,0,0,0,191,0,0,0,209,0,0,0,128,0,0,0,208,0,0,0,
+  184,0,0,0,208,0,...>>
+4> tu:show_list(B8).
+ W:[208,191,209,128,208,184,208,178,208,181,209,130]
+ P:[208,191,209,128,208,184,208,178,208,181,209,130]
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:Ð¿ÑÐ¸Ð²ÐµÑ
+TP:[208,191,209,128,208,184,208,178,208,181,209,130]
+ok
+#+END_SRC
+
+R16 при компиляции считает, что файл модуля находится в кодировке latin1, тогда как реально текстовый редактор
+сохраняет его в кодировке unicode. Из-за этого данные, которые уже в utf8, компилятор еще раз переконвертирует.
+
+
+** Выводы
+
+Если мы хардкодим бинарники с нелатинскими символами в модулях, то
+обязательно нужно указывать кодировку:
+#+BEGIN_SRC Erlang
+bin_utf8() -> <<"привет"/utf8>>.
+bin_utf16() -> <<"привет"/utf16>>.
+bin_utf32() -> <<"привет"/utf32>>.
+#+END_SRC
+
+и обязательно нужно добавлять
+#+BEGIN_SRC Erlang
+%% -*- coding: utf-8 -*-
+#+END_SRC
+в начале файла.
+
+Но, по-хорошему таких бинарников в коде вообще не должно быть.
+Такого рода строки лучше выносить куда-нибудь во внешние ресурсы.
+
+
+* Работа со строками
+
+В эрланг проектах в большинстве случаев мы просто перекладываем
+какие-то данные от клиента в базу, из базы клиенту, от одного клиента
+другому клиенту. Мы получаем их бинарном виде, и в таком же виде их
+отдаем. И переводить их в строки нет надобности.
+
+Но иногда все-таки нужно заглянуть внутрь данных и что-нибудь с ними сделать.
+Посмотрим, что есть в стандартных библиотеках.
+
+** модуль unicode
+http://www.erlang.org/doc/man/unicode.html
+
+Для начала нужно преобразовать бинарные данные в строку. И тут есть два способа:
+неправильный -- erlang:binary_to_list, и правильный -- unicode:characters_to_list.
+
+binary_to_list просто превращает каждый байт бинарника в символ строки,
+что работает, понятное дело, только для однобайтных кодировок.
+
+unicode:characters_to_list работает с учетом кодировки, понимает разные варианты unicode,
+и на выходе дает список из code points.
+
+Обратное преобразование, из строки в бинарник, делает unicode:characters_to_binary.
+
+Обе эти функции, characters_to_list и characters_to_binary на вход принимают
+сложный тип данных, описанный в документации как
+latin1_chardata() | chardata() | external_chardata()
+
+Этот тип я бы названл unicode_iolist(). Он аналогичен [[http://learnyousomeerlang.com/buckets-of-sockets][iolist()]], но в отличие от него
+разрешает числа больше 255.
+
+
+** модуль string
+http://www.erlang.org/doc/man/string.html
+
+Здесь есть несколько полезных функций и несколько ненужных )
+
+*** Полезные функции
+
+*tokens/2* -- разбивает сроку на подстроки по разделителю.
+#+BEGIN_SRC Erlang
+1> string:tokens("http://google.com/?q=hello", "/").
+["http:","google.com","?q=hello"]
+
+1> S = unicode:characters_to_list(<<"Привет мир!"/utf8>>).
+"Привет мир!"
+2> string:tokens(S, " ").
+["Привет","мир!"]
+#+END_SRC
+
+Но тут есть один нюанс: второй аргумент, это список разделителей, а не подстрока.
+#+BEGIN_SRC Erlang
+3> Xml = "<node1><node2></node2></node1>".
+"<node1><node2></node2></node1>"
+4> string:tokens(Xml, "<>").
+["node1","node2","/node2","/node1"]
+6> string:tokens("1=2==3===4==5=6", "===").
+["1","2","3","4","5","6"]
+#+END_SRC
+Если нужно разбиение по подстроке, то придется писать кастомную функцию.
+
+*join/2* -- обратная по смыслу функция.
+#+BEGIN_SRC Erlang
+7> string:join(["item1", "item2", "item3"], ", ").
+"item1, item2, item3"
+#+END_SRC
+
+*strip* -- удаляет пробелы (или другие символы) в начале и/или конце строки.
+#+BEGIN_SRC Erlang
+8> S2 = "    bla bla bla   ".
+"    bla bla bla   "
+9> string:strip(S2).
+"bla bla bla"
+10> string:strip(S2, left).
+"bla bla bla   "
+11> string:strip(S2, right).
+"    bla bla bla"
+12> string:strip(S2, both).
+"bla bla bla"
+13> string:strip("---bla-bla-bla----", both, $-).
+"bla-bla-bla"
+#+END_SRC
+
+*chr*, *rchr*, *str*, *rstr* -- возвращает позицию символа или подстроки с начала или с конца строки.
+#+BEGIN_SRC Erlang
+14> string:chr("Hello", $e).
+2
+15> string:rchr("Hello", $e).
+2
+16> string:str("Hello", "llo").
+3
+17> string:rstr("Hello", "llo").
+3
+#+END_SRC
+
+
+*to_upper*, *to_lower*
+#+BEGIN_SRC Erlang
+19> string:to_upper("Hello").
+"HELLO"
+20> string:to_lower("Hello").
+"hello"
+21> string:to_upper("Привет").
+"Привет"
+22> string:to_lower("Привет").
+#+END_SRC
+Работает только с латинскими символами, остальные не меняет.
+
+*to_float*, *to_integer*
+Конечно, у нас есть функции erlang:list_to_float, erlang:list_to_integer.
+Но они бросают исключение, если передать неправильную строку.
+А to_float, to_integer исключение не бросают, а возвращают error. Поэтому есть смысл их использовать,
+если мы не знаем точно, что строку можно преобразовать в число.
+#+BEGIN_SRC Erlang
+25> string:to_integer("123").
+{123,[]}
+26> string:to_integer("123aaa").
+{123,"aaa"}
+27> string:to_integer("aaa").
+{error,no_integer}
+28> string:to_float("3.14159").
+{3.14159,[]}
+29> string:to_float("3").
+{error,no_float}
+30> list_to_integer("123").
+123
+31> list_to_integer("123aaa").
+   exception error: bad argument
+     in function  list_to_integer/1
+        called as list_to_integer("123aaa")
+32> list_to_float("3.14159").
+3.14159
+33> list_to_float("3").
+   exception error: bad argument
+     in function  list_to_float/1
+        called as list_to_float("3")
+#+END_SRC
+
+Полезных функций не густо.
+
+*** "Ненужные" функции:
+
+*sub_string*, *sub_str* не нужны, потому что есть *lists:sublist*
+
+*center*, *left*, *right* нужны только для каких-нибудь консольных интерфейсов.
+
+*sub_word* тоже самое, что lists:nth(Index, string:tokens(Str, " "))
+
+*words* тоже самое, что length(string:tokens(S, " "))
+
+*concat* тоже самое, что "str1" ++ "str2"
+
+*equal* тоже самое, что Str1 == Str2
+
+*len* тоже самое, что erlang:length
+
+Все функции в этом модуле, кроме to_lower и to_upper, нормально работают с unicode строками.
+
+
+** модуль lists
+http://www.erlang.org/doc/man/lists.html
+
+Посколько строки суть списки чисел, к ним применимы все функции модуля *lists*.
+Но только если они правильно преобразованы :)
+#+BEGIN_SRC Erlang
+58> B = <<"Привет"/utf8>>.
+<<"Привет"/utf8>>
+59> S1 = unicode:characters_to_list(B).
+"Привет"
+60> S2 = binary_to_list(B).
+[208,159,209,128,208,184,208,178,208,181,209,130]
+#+END_SRC
+
+Тут S1 правильная строка, и с ней можно работать хоть модулем *string*, хоть модулем *lists*.
+А S2 неправильная строка, и с ней нормально работать не получится.
+
+*append* или оператор *++* использовать можно для коротких строк. Но не желательно
+использовать для длинных строк или часто повторять.
+#+BEGIN_SRC Erlang
+61> Name = "Вася".
+"Вася"
+62> "My name is " ++ Name.
+"My name is Вася"
+63> Table = "users".
+"users"
+64> Id = 5.
+5
+65> "SELECT name FROM " ++ Table ++ " WHERE id = " ++ integer_to_list(Id).
+"SELECT name FROM users WHERE id = 5"
+#+END_SRC
+
+К счастью, в это нет нужды, потому что есть *iolist*:
+#+BEGIN_SRC Erlang
+66> L1 = ["My name is ", Name].
+["My name is ","Вася"]
+67> L2 = ["SELECT name FROM ", Table, " WHERE id = ", integer_to_list(Id)].
+["SELECT name FROM ","users"," WHERE id = ","5"]
+#+END_SRC
+
+iolist можно долго формировать из разных кусков, делая любую вложенность.
+И уже после того, как все сформировано, одним вызовом lists:flatten
+или unicode:characters_to_binary получить окончательный результат:
+#+BEGIN_SRC Erlang
+68> lists:flatten(L1).
+"My name is Вася"
+69> unicode:characters_to_binary(L2).
+<<"SELECT name FROM users WHERE id = 5">>
+#+END_SRC
+
+*prefix/2*, *suffix/2*, *split/2*, *splitwith/2*, *sublist/3* -- все это вполне годится для работы со строками.
+
+
+** модуль re
+
+http://www.erlang.org/doc/man/re.html
+
+Модуль re поддерживает unicode.
+
+#+BEGIN_SRC Erlang
+1> {ok, P} = re:compile(<<"^привет.*"/utf8>>, [unicode]).
+{ok,{re_pattern,0,1,0,
+                <<69,82,67,80,92,0,0,0,16,8,0,0,1,0,0,0,255,255,255,255,
+                  255,255,...>>}}
+2> S = unicode:characters_to_list(<<"привет"/utf8>>).
+"привет"
+3> re:compile(S).
+   exception error: bad argument
+     in function  re:compile/1
+        called as re:compile("привет")
+4> re:compile(S, [unicode]).
+{ok,{re_pattern,0,1,0,
+                <<69,82,67,80,89,0,0,0,0,8,0,0,81,0,0,0,255,255,255,255,
+                  255,255,...>>}}
+
+5> re:run(<<"привет мир"/utf8>>, P).
+{match,[{0,19}]}
+6> re:run(<<"О, привет мир"/utf8>>, P).
+nomatch
+7> re:run(<<"привет мир"/utf8>>, P2).
+{match,[{0,12}]}
+8> re:run(<<"О, привет мир"/utf8>>, P2).
+{match,[{4,12}]}
+9> S2 = unicode:characters_to_list(<<"мир"/utf8>>).
+"мир"
+10> re:run(S2, P).
+nomatch
+#+END_SRC
+
+Как видно, и re:compile и re:run принимают unicode и в бинарном виде, и в виде списка code points.
+Но для re:compile нужно явно указывать опцию unicode.
+
+#+BEGIN_SRC Erlang
+94> {ok, P3} = re:compile(<<"хорош"/utf8>>).
+{ok,{re_pattern,0,0,0,
+                <<69,82,67,80,91,0,0,0,0,0,0,0,81,0,0,0,255,255,255,255,
+                  255,255,...>>}}
+95>
+95> re:replace(<<"Эрланг хорош"/utf8>>, P3, <<"прекрасен"/utf8>>).
+[<<"Эрланг "/utf8>>,<<"прекрасен"/utf8>>]
+#+END_SRC
+
+Хотя если регулярка задается бинарником, а не строкой, то работает и так :)
+
+
+* Библиотека ux
+
+Это большая и сложная библиотека, и про нее нужен отдельный большой разговор.
+Который, может быть, когда нибудь будет :)
+
+Пока только дам ссылку https://github.com/erlang-unicode/ux.
+Эта либа вам понадобится, если вам нужны to_upper/to_lower для нелатинских строк.
+Или если вы хотите написать полнотекстовый поиск на эрланге :)

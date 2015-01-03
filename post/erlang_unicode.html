@@ -1,0 +1,955 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Unicode в Erlang</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>Unicode в Erlang</h1>
+<p><i>3 января 2015</i></p>
+
+<p>
+C этой темой я выступал на 7-й встрече <a href="https://www.youtube.com/watch?v=VqmbWElG69U">Belarus Erlang User Group</a>.
+Но здесь материал более свежий, я доработал в некоторые моменты, недоработанные на момент выступления,
+и более подробный.
+</p>
+
+<div id="outline-container-sec-2" class="outline-2">
+<h2>Вступление</h2>
+<div class="outline-text-2" id="text-2">
+<p>
+Не буду рассказывать общеизвестные вещи и пересказывать документацию,
+однако документация must read, поэтому ссылки даю:
+</p>
+<ul class="org-ul">
+<li><a href="http://www.erlang.org/doc/apps/stdlib/unicode_usage.html">Using Unicode in Erlang</a>
+</li>
+<li><a href="http://www.erlang.org/doc/man/unicode.html">Модуль unicode</a>
+</li>
+</ul>
+
+<p>
+И бонусом хорошее видео про Unicode:
+<a href="https://www.youtube.com/watch?v=MijmeoH9LT4">Characters, Symbols and the Unicode Miracle - Computerphile</a>
+</p>
+</div>
+</div>
+<div id="outline-container-sec-3" class="outline-2">
+<h2>Сразу немного практики</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+Возьмем эрланг двух версий: <b>R16B03</b> и <b>OTP 17.3</b> (более ранние версии, я полагаю, не актуальны).
+</p>
+
+<p>
+Попробуем:
+</p>
+<ul class="org-ul">
+<li>R17 и R16;
+</li>
+<li>задавать бинарники в консоли и хардкодить их в модуле;
+</li>
+<li>запускать erl с флагом +pc и без этого флага.
+</li>
+</ul>
+
+<p>
+И посмотрим:
+</p>
+<ul class="org-ul">
+<li>что за бинарники получаются;
+</li>
+<li>как с ними работает io:format (~w, ~p, ~tp, ~s, ~ts);
+</li>
+<li>и что получается после unicode:characters_to_list.
+</li>
+</ul>
+
+<p>
+Модуль для теста будет очень простой:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
+-module(tu).
+-export([bin_default/0, bin_utf8/0, bin_utf16/0, bin_utf32/0, str_default/0,
+         show/1, show_list/1, show_list/2]).
+
+bin_default() -&gt; &lt;&lt;"привет"&gt;&gt;.
+bin_utf8() -&gt; &lt;&lt;"привет"/utf8&gt;&gt;.
+bin_utf16() -&gt; &lt;&lt;"привет"/utf16&gt;&gt;.
+bin_utf32() -&gt; &lt;&lt;"привет"/utf32&gt;&gt;.
+str_default() -&gt; "привет".
+
+show(Data) -&gt;
+    io:format(" W:~w~n", [Data]),
+    io:format(" P:~p~n", [Data]),
+    catch io:format(" S:~s~n", [Data]),
+    catch io:format("TS:~ts~n", [Data]),
+    io:format("TP:~tp~n", [Data]),
+    ok.
+
+show_list(Bin) -&gt;
+    show(unicode:characters_to_list(Bin)).
+
+show_list(Bin, Encoding) -&gt;
+    show(unicode:characters_to_list(Bin, Encoding)).
+</pre>
+</div>
+
+<p>
+Небольшое теоретическое отступление, что такое <a href="http://www.erlang.org/doc/man/erl.html">флаг +pc</a>:
+</p>
+
+<p>
+Суть в том, что в некоторых случаях Erlang применяет эвристику, пытаясь определить,
+является ли данный список строкой, чтобы отобразить его соответствующим образом.
+Если флаг не задан, то эвристика применяется только для строк в <b>latin1</b>, а
+если задан, то и для строк в <b>unicode</b>. Его действие мы увидим ниже на примерах.
+</p>
+
+<p>
+И, пожалуй, стоит пояснить аргументы форматирования <a href="http://www.erlang.org/doc/man/io.html#fwrite-1">io:format</a>:
+</p>
+<ul class="org-ul">
+<li><b>~w</b> &#x2013; показывает term как есть, без модификаций.
+</li>
+<li><b>~p</b> &#x2013; применяет эвристику, пытаясь определить, является ли term строкой в latin1.
+</li>
+<li><b>~tp</b> &#x2013; применяет эвристику, пытаясь определить, является ли term строкой в unicode.
+</li>
+<li><b>~s</b> &#x2013; показывает term как строку в latin1.
+</li>
+<li><b>~ts</b> &#x2013; показывает term как строку в unicode.
+</li>
+</ul>
+</div>
+
+
+<div id="outline-container-sec-3-1" class="outline-3">
+<h3>Запускаем R17 с флагом +pc unicode</h3>
+<div class="outline-text-3" id="text-3-1">
+<div class="org-src-container">
+
+<pre class="src src-Erlang">$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; c(tu).
+{ok,tu}
+
+2&gt; B = &lt;&lt;"привет"/utf8&gt;&gt;.
+&lt;&lt;"привет"/utf8&gt;&gt;
+</pre>
+</div>
+<p>
+Бинарник создан в консоли с указанием кодировки utf8. Он отобразился как &lt;&lt;"привет"/utf8&gt;&gt;,
+это сработал флаг +pc unicode.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">3&gt; tu:show(B).
+ W:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ P:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:&lt;&lt;"привет"/utf8&gt;&gt;
+ok
+</pre>
+</div>
+<p> Здесь мы видим результаты выполения io:format.</p>
+<p>~w и ~p показывают &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt; &#x2013; так и должен выглядеть utf8 побайтно.</p>
+<p>~s показывает какую-то неправильную строку. Это ок, потому что ~s работает только с latin1.</p>
+<p>~ts показывает правильную строку.</p>
+<p>~tp показывает, как сработала эвристка определения строки.</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">4&gt; tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+</pre>
+</div>
+<p>
+Здесь мы видим, что получается после unicode:characters_to_list.
+~w и ~p показывают список из unicode code point.
+~s не сработал, упал с исключением.
+~ts и ~tp показывают правильную строку для этого списка.
+</p>
+
+<p>
+Итого, с utf8 в R17 все работает ок.
+</p>
+</div>
+</div>
+<div id="outline-container-sec-3-2" class="outline-3">
+<h3>Если запустить R17 без флага +pc, то</h3>
+<div class="outline-text-3" id="text-3-2">
+<div class="org-src-container">
+
+<pre class="src src-Erlang">yura ~/tmp $ erl
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; B = &lt;&lt;"привет"/utf8&gt;&gt;.
+&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+2&gt; l(tu).
+{module,tu}
+3&gt; tu:show(B).
+ W:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ P:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ok
+4&gt; tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:[1087,1088,1080,1074,1077,1090]
+ok
+5&gt;
+</pre>
+</div>
+
+<p>
+Значение B теперь отображается в консоли как &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+а не как &lt;&lt;"привет"/utf8&gt;&gt;.
+io:format("~tp", [B]) теперь показывает &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+и [1087,1088,1080,1074,1077,1090] вместо &lt;&lt;"привет"/utf8&gt;&gt; и "привет". Все остальное
+работает так же.
+</p>
+
+<p>
+Если мы будем брать бинарник, захардкоженный в коде модуля, а не задавать его в консоли,
+то все равно получим такое же поведение.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; B = tu:bin_utf8().
+&lt;&lt;"привет"/utf8&gt;&gt;
+
+$ erl
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; B = tu:bin_utf8().
+&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-3-3" class="outline-3">
+<h3>R17 и utf16/utf32</h3>
+<div class="outline-text-3" id="text-3-3">
+<p>
+Теперь посмотрим, как R17 работает с utf16 и utf32.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">$ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; B1 = &lt;&lt;"привет"/utf16&gt;&gt;.
+&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
+2&gt; B2 = &lt;&lt;"привет"/utf32&gt;&gt;.
+&lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
+</pre>
+</div>
+<p>
+Тут эвристика не работает, и независимо от флага +pc все равно показывается бинарник.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">3&gt; tu:show(B1).
+ W:&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
+ P:&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
+ S:^D?^D@^D8^D2^D5^DB
+TS:^D?^D@^D8^D2^D5^DB
+TP:&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
+ok
+4&gt; tu:show(B2).
+ W:&lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
+ P:&lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
+ S:^@^@^D?^@^@^D@^@^@^D8^@^@^D2^@^@^D5^@^@^DB
+TS:^@^@^D?^@^@^D@^@^@^D8^@^@^D2^@^@^D5^@^@^DB
+TP:&lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
+ok
+</pre>
+</div>
+<p>
+io:format не может показать этот бинарник как строку, что понятно.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">5&gt; tu:show_list(B1, utf16).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+6&gt; tu:show_list(B2, utf32).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+</pre>
+</div>
+<p>
+Здесь нужен unicode:characters_to_list/2. И если кодировка указана правильно, то все ок.
+</p>
+
+<p>
+И здесь тоже бинарник, захардкоженный в коде модуля, дает такое же поведение,
+как и бинарник, заданный в консоли.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-3-4" class="outline-3">
+<h3>R17 и бинарник без указания кодировки</h3>
+<div class="outline-text-3" id="text-3-4">
+<p>
+Здесь интересная ситуация.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">yura ~/tmp $ erl +pc unicode
+Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V6.2  (abort with ^G)
+1&gt; B = &lt;&lt;"привет"&gt;&gt;.
+&lt;&lt;"?@825B"&gt;&gt;
+</pre>
+</div>
+<p>
+Значение показано как строка, но неправильно.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">2&gt; tu:show(B).
+ W:&lt;&lt;63,64,56,50,53,66&gt;&gt;
+ P:&lt;&lt;"?@825B"&gt;&gt;
+ S:?@825B
+TS:?@825B
+TP:&lt;&lt;"?@825B"&gt;&gt;
+ok
+</pre>
+</div>
+<p>
+Видно, что в бинарнике по одному байту на символ. И это те байты, которые в utf16/utf32 стоят во 2-й/4-й позициях.
+То есть, это несуществующая кодировка utf4 :)
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">4&gt; tu:show_list(B, utf8).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+5&gt; tu:show_list(B, utf16).
+ W:[16192,14386,13634]
+ P:[16192,14386,13634]
+TS:㽀㠲㕂
+TP:"㽀㠲㕂"
+ok
+6&gt; tu:show_list(B, utf32).
+ W:{error,[],&lt;&lt;63,64,56,50,53,66&gt;&gt;}
+ P:{error,[],&lt;&lt;"?@825B"&gt;&gt;}
+TP:{error,[],&lt;&lt;"?@825B"&gt;&gt;}
+ok
+7&gt; tu:show_list(B, unicode).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+8&gt; tu:show_list(B, latin1).
+ W:[63,64,56,50,53,66]
+ P:"?@825B"
+ S:?@825B
+TS:?@825B
+TP:"?@825B"
+ok
+</pre>
+</div>
+
+<p>
+Попытки преобразовать этот бинарник с помощью
+unicode:characters_to_list с указанием разных кодировок правильного
+результата не дают.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-3-5" class="outline-3">
+<h3>R16</h3>
+<div class="outline-text-3" id="text-3-5">
+<p>
+Если вы не забыли указать
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
+</pre>
+</div>
+<p>
+в первой строке модуля, то в R16 все будет работать так же, как в R17.
+А если забыли, то поведение для захардкоженных в модуле бинарников будет отличаться.
+</p>
+
+<p>
+Бинарник без указания кодировки будет рассматриваться как бинарник в utf8:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V5.10.4  (abort with ^G)
+1&gt; c(tu).
+{ok,tu}
+2&gt; B = tu:bin_default().
+&lt;&lt;"привет"/utf8&gt;&gt;
+3&gt; tu:show(B).
+ W:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ P:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:привет
+TP:&lt;&lt;"привет"/utf8&gt;&gt;
+ok
+4&gt; tu:show_list(B).
+ W:[1087,1088,1080,1074,1077,1090]
+ P:[1087,1088,1080,1074,1077,1090]
+TS:привет
+TP:"привет"
+ok
+</pre>
+</div>
+
+<p>
+А бинарники с указанием кодировки будут работать неправильно:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+
+Eshell V5.10.4  (abort with ^G)
+1&gt; B8 = tu:bin_utf8().
+&lt;&lt;195,144,194,191,195,145,194,128,195,144,194,184,195,144,
+  194,178,195,144,194,181,195,145,194,130&gt;&gt;
+2&gt; B16 = tu:bin_utf16().
+&lt;&lt;0,208,0,191,0,209,0,128,0,208,0,184,0,208,0,178,0,208,0,
+  181,0,209,0,130&gt;&gt;
+3&gt; B32 = tu:bin_utf32().
+&lt;&lt;0,0,0,208,0,0,0,191,0,0,0,209,0,0,0,128,0,0,0,208,0,0,0,
+  184,0,0,0,208,0,...&gt;&gt;
+4&gt; tu:show_list(B8).
+ W:[208,191,209,128,208,184,208,178,208,181,209,130]
+ P:[208,191,209,128,208,184,208,178,208,181,209,130]
+ S:Ð¿ÑÐ¸Ð²ÐµÑ
+TS:Ð¿ÑÐ¸Ð²ÐµÑ
+TP:[208,191,209,128,208,184,208,178,208,181,209,130]
+ok
+</pre>
+</div>
+
+<p>
+R16 при компиляции считает, что файл модуля находится в кодировке latin1, тогда как реально текстовый редактор
+сохраняет его в кодировке unicode. Из-за этого данные, которые уже в utf8, компилятор еще раз переконвертирует.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-3-6" class="outline-3">
+<h3>Выводы</h3>
+<div class="outline-text-3" id="text-3-6">
+<p>
+Если мы хардкодим бинарники с нелатинскими символами в модулях, то
+обязательно нужно указывать кодировку:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">bin_utf8() -&gt; &lt;&lt;"привет"/utf8&gt;&gt;.
+bin_utf16() -&gt; &lt;&lt;"привет"/utf16&gt;&gt;.
+bin_utf32() -&gt; &lt;&lt;"привет"/utf32&gt;&gt;.
+</pre>
+</div>
+
+<p>
+и обязательно нужно добавлять
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
+</pre>
+</div>
+<p>
+в начале файла.
+</p>
+
+<p>
+Но, по-хорошему таких бинарников в коде вообще не должно быть.
+Такого рода строки лучше выносить куда-нибудь во внешние ресурсы.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-4" class="outline-2">
+<h2>Работа со строками</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+В эрланг проектах в большинстве случаев мы просто перекладываем
+какие-то данные от клиента в базу, из базы клиенту, от одного клиента
+другому клиенту. Мы получаем их бинарном виде, и в таком же виде их
+отдаем. И переводить их в строки нет надобности.
+</p>
+
+<p>
+Но иногда все-таки нужно заглянуть внутрь данных и что-нибудь с ними сделать.
+Посмотрим, что есть в стандартных библиотеках.
+</p>
+</div>
+
+<div id="outline-container-sec-4-1" class="outline-3">
+<h3>модуль unicode</h3>
+<div class="outline-text-3" id="text-4-1">
+<p>
+<a href="http://www.erlang.org/doc/man/unicode.html">http://www.erlang.org/doc/man/unicode.html</a>
+</p>
+
+<p>
+Для начала нужно преобразовать бинарные данные в строку. И тут есть два способа:
+неправильный &#x2013; erlang:binary_to_list, и правильный &#x2013; unicode:characters_to_list.
+</p>
+
+<p>
+binary_to_list просто превращает каждый байт бинарника в символ строки,
+что работает, понятное дело, только для однобайтных кодировок.
+</p>
+
+<p>
+unicode:characters_to_list работает с учетом кодировки, понимает разные варианты unicode,
+и на выходе дает список из code points.
+</p>
+
+<p>
+Обратное преобразование, из строки в бинарник, делает unicode:characters_to_binary.
+</p>
+
+<p>
+Обе эти функции, characters_to_list и characters_to_binary на вход принимают
+сложный тип данных, описанный в документации как
+latin1_chardata() | chardata() | external_chardata()
+</p>
+
+<p>
+Этот тип я бы названл unicode_iolist(). Он аналогичен <a href="http://learnyousomeerlang.com/buckets-of-sockets">iolist()</a>,
+но, в отличие от него,
+разрешает числа больше 255.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-4-2" class="outline-3">
+<h3>модуль string</h3>
+<div class="outline-text-3" id="text-4-2">
+<p>
+<a href="http://www.erlang.org/doc/man/string.html">http://www.erlang.org/doc/man/string.html</a>
+</p>
+
+<p>
+Здесь есть несколько полезных функций и несколько ненужных )
+</p>
+</div>
+
+<div id="outline-container-sec-4-2-1" class="outline-4">
+<h4>Полезные функции</h4>
+<div class="outline-text-4" id="text-4-2-1">
+<p>
+<b>tokens/2</b> &#x2013; разбивает сроку на подстроки по разделителю.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">1&gt; string:tokens("http://google.com/?q=hello", "/").
+["http:","google.com","?q=hello"]
+
+1&gt; S = unicode:characters_to_list(&lt;&lt;"Привет мир!"/utf8&gt;&gt;).
+"Привет мир!"
+2&gt; string:tokens(S, " ").
+["Привет","мир!"]
+</pre>
+</div>
+
+<p>
+Но тут есть один нюанс: второй аргумент, это список разделителей, а не подстрока.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">3&gt; Xml = "&lt;node1&gt;&lt;node2&gt;&lt;/node2&gt;&lt;/node1&gt;".
+"&lt;node1&gt;&lt;node2&gt;&lt;/node2&gt;&lt;/node1&gt;"
+4&gt; string:tokens(Xml, "&lt;&gt;").
+["node1","node2","/node2","/node1"]
+6&gt; string:tokens("1=2==3===4==5=6", "===").
+["1","2","3","4","5","6"]
+</pre>
+</div>
+<p>
+Если нужно разбиение по подстроке, то придется писать кастомную функцию.
+</p>
+
+<p>
+<b>join/2</b> &#x2013; обратная по смыслу функция.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">7&gt; string:join(["item1", "item2", "item3"], ", ").
+"item1, item2, item3"
+</pre>
+</div>
+
+<p>
+<b>strip</b> &#x2013; удаляет пробелы (или другие символы) в начале и/или конце строки.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">8&gt; S2 = "    bla bla bla   ".
+"    bla bla bla   "
+9&gt; string:strip(S2).
+"bla bla bla"
+10&gt; string:strip(S2, left).
+"bla bla bla   "
+11&gt; string:strip(S2, right).
+"    bla bla bla"
+12&gt; string:strip(S2, both).
+"bla bla bla"
+13&gt; string:strip("---bla-bla-bla----", both, $-).
+"bla-bla-bla"
+</pre>
+</div>
+
+<p>
+<b>chr</b>, <b>rchr</b>, <b>str</b>, <b>rstr</b> &#x2013; возвращает позицию символа или подстроки с начала или с конца строки.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">14&gt; string:chr("Hello", $e).
+2
+15&gt; string:rchr("Hello", $e).
+2
+16&gt; string:str("Hello", "llo").
+3
+17&gt; string:rstr("Hello", "llo").
+3
+</pre>
+</div>
+
+
+<p>
+<b>to_upper</b>, <b>to_lower</b>
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">19&gt; string:to_upper("Hello").
+"HELLO"
+20&gt; string:to_lower("Hello").
+"hello"
+21&gt; string:to_upper("Привет").
+"Привет"
+22&gt; string:to_lower("Привет").
+</pre>
+</div>
+<p>
+Работает только с латинскими символами, остальные не меняет.
+</p>
+
+<p> <b>to_float</b>, <b>to_integer</b></p>
+<p>Конечно, у нас есть функции erlang:list_to_float, erlang:list_to_integer.
+Но они бросают исключение, если передать неправильную строку.
+А to_float, to_integer исключение не бросают, а возвращают error. Поэтому есть смысл их использовать,
+если мы не знаем точно, что строку можно преобразовать в число.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">25&gt; string:to_integer("123").
+{123,[]}
+26&gt; string:to_integer("123aaa").
+{123,"aaa"}
+27&gt; string:to_integer("aaa").
+{error,no_integer}
+28&gt; string:to_float("3.14159").
+{3.14159,[]}
+29&gt; string:to_float("3").
+{error,no_float}
+30&gt; list_to_integer("123").
+123
+31&gt; list_to_integer("123aaa").
+   exception error: bad argument
+     in function  list_to_integer/1
+        called as list_to_integer("123aaa")
+32&gt; list_to_float("3.14159").
+3.14159
+33&gt; list_to_float("3").
+   exception error: bad argument
+     in function  list_to_float/1
+        called as list_to_float("3")
+</pre>
+</div>
+
+<p>
+Полезных функций не густо.
+</p>
+</div>
+</div>
+<div id="outline-container-sec-4-2-2" class="outline-4">
+<h4>"Ненужные" функции:</h4>
+<div class="outline-text-4" id="text-4-2-2">
+<p>
+<b>sub_string</b>, <b>sub_str</b> не нужны, потому что есть <b>lists:sublist</b>
+</p>
+
+<p>
+<b>center</b>, <b>left</b>, <b>right</b> нужны только для каких-нибудь консольных интерфейсов.
+</p>
+
+<p>
+<b>sub_word</b> тоже самое, что lists:nth(Index, string:tokens(Str, " "))
+</p>
+
+<p>
+<b>words</b> тоже самое, что length(string:tokens(S, " "))
+</p>
+
+<p>
+<b>concat</b> тоже самое, что "str1" ++ "str2"
+</p>
+
+<p>
+<b>equal</b> тоже самое, что Str1 == Str2
+</p>
+
+<p>
+<b>len</b> тоже самое, что erlang:length
+</p>
+
+<p>
+Все функции в этом модуле, кроме to_lower и to_upper, нормально работают с unicode строками.
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-4-3" class="outline-3">
+<h3>модуль lists</h3>
+<div class="outline-text-3" id="text-4-3">
+<p>
+<a href="http://www.erlang.org/doc/man/lists.html">http://www.erlang.org/doc/man/lists.html</a>
+</p>
+
+<p>
+Посколько строки суть списки чисел, к ним применимы все функции модуля <b>lists</b>.
+Но только если они правильно преобразованы :)
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">58&gt; B = &lt;&lt;"Привет"/utf8&gt;&gt;.
+&lt;&lt;"Привет"/utf8&gt;&gt;
+59&gt; S1 = unicode:characters_to_list(B).
+"Привет"
+60&gt; S2 = binary_to_list(B).
+[208,159,209,128,208,184,208,178,208,181,209,130]
+</pre>
+</div>
+
+<p>
+Тут S1 правильная строка, и с ней можно работать хоть модулем <b>string</b>, хоть модулем <b>lists</b>.
+А S2 неправильная строка, и с ней нормально работать не получится.
+</p>
+
+<p>
+<b>append</b> или оператор <b>++</b> использовать можно для коротких строк. Но не желательно
+использовать для длинных строк или часто повторять.
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">61&gt; Name = "Вася".
+"Вася"
+62&gt; "My name is " ++ Name.
+"My name is Вася"
+63&gt; Table = "users".
+"users"
+64&gt; Id = 5.
+5
+65&gt; "SELECT name FROM " ++ Table ++ " WHERE id = " ++ integer_to_list(Id).
+"SELECT name FROM users WHERE id = 5"
+</pre>
+</div>
+
+<p>
+К счастью, в это нет нужды, потому что есть <b>iolist</b>:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">66&gt; L1 = ["My name is ", Name].
+["My name is ","Вася"]
+67&gt; L2 = ["SELECT name FROM ", Table, " WHERE id = ", integer_to_list(Id)].
+["SELECT name FROM ","users"," WHERE id = ","5"]
+</pre>
+</div>
+
+<p>
+iolist можно долго формировать из разных кусков, делая любую вложенность.
+И уже после того, как все сформировано, одним вызовом lists:flatten
+или unicode:characters_to_binary получить окончательный результат:
+</p>
+<div class="org-src-container">
+
+<pre class="src src-Erlang">68&gt; lists:flatten(L1).
+"My name is Вася"
+69&gt; unicode:characters_to_binary(L2).
+&lt;&lt;"SELECT name FROM users WHERE id = 5"&gt;&gt;
+</pre>
+</div>
+
+<p>
+<b>prefix/2</b>, <b>suffix/2</b>, <b>split/2</b>, <b>splitwith/2</b>, <b>sublist/3</b> &#x2013; все это вполне годится для работы со строками.
+</p>
+</div>
+</div>
+
+<div id="outline-container-sec-4-4" class="outline-3">
+<h3>модуль re</h3>
+<div class="outline-text-3" id="text-4-4">
+<p>
+<a href="http://www.erlang.org/doc/man/re.html">http://www.erlang.org/doc/man/re.html</a>
+</p>
+
+<p>
+Модуль re поддерживает unicode.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">1&gt; {ok, P} = re:compile(&lt;&lt;"^привет.*"/utf8&gt;&gt;, [unicode]).
+{ok,{re_pattern,0,1,0,
+                &lt;&lt;69,82,67,80,92,0,0,0,16,8,0,0,1,0,0,0,255,255,255,255,
+                  255,255,...&gt;&gt;}}
+2&gt; S = unicode:characters_to_list(&lt;&lt;"привет"/utf8&gt;&gt;).
+"привет"
+3&gt; re:compile(S).
+   exception error: bad argument
+     in function  re:compile/1
+        called as re:compile("привет")
+4&gt; re:compile(S, [unicode]).
+{ok,{re_pattern,0,1,0,
+                &lt;&lt;69,82,67,80,89,0,0,0,0,8,0,0,81,0,0,0,255,255,255,255,
+                  255,255,...&gt;&gt;}}
+
+5&gt; re:run(&lt;&lt;"привет мир"/utf8&gt;&gt;, P).
+{match,[{0,19}]}
+6&gt; re:run(&lt;&lt;"О, привет мир"/utf8&gt;&gt;, P).
+nomatch
+7&gt; re:run(&lt;&lt;"привет мир"/utf8&gt;&gt;, P2).
+{match,[{0,12}]}
+8&gt; re:run(&lt;&lt;"О, привет мир"/utf8&gt;&gt;, P2).
+{match,[{4,12}]}
+9&gt; S2 = unicode:characters_to_list(&lt;&lt;"мир"/utf8&gt;&gt;).
+"мир"
+10&gt; re:run(S2, P).
+nomatch
+</pre>
+</div>
+
+<p>
+Как видно, и re:compile и re:run принимают unicode и в бинарном виде, и в виде списка code points.
+Но для re:compile нужно явно указывать опцию unicode.
+</p>
+
+<div class="org-src-container">
+
+<pre class="src src-Erlang">94&gt; {ok, P3} = re:compile(&lt;&lt;"хорош"/utf8&gt;&gt;).
+{ok,{re_pattern,0,0,0,
+                &lt;&lt;69,82,67,80,91,0,0,0,0,0,0,0,81,0,0,0,255,255,255,255,
+                  255,255,...&gt;&gt;}}
+95&gt;
+95&gt; re:replace(&lt;&lt;"Эрланг хорош"/utf8&gt;&gt;, P3, &lt;&lt;"прекрасен"/utf8&gt;&gt;).
+[&lt;&lt;"Эрланг "/utf8&gt;&gt;,&lt;&lt;"прекрасен"/utf8&gt;&gt;]
+</pre>
+</div>
+
+<p>
+Хотя если регулярка задается бинарником, а не строкой, то работает и так :)
+</p>
+</div>
+</div>
+</div>
+
+<div id="outline-container-sec-5" class="outline-2">
+<h2>Библиотека ux</h2>
+<div class="outline-text-2" id="text-5">
+<p>
+Это большая и сложная библиотека, и про нее нужен отдельный большой разговор.
+Который, может быть, когда нибудь будет :)
+</p>
+
+<p>
+Пока только дам ссылку <a href="https://github.com/erlang-unicode/ux">https://github.com/erlang-unicode/ux</a>.
+Эта либа вам понадобится, если вам нужны to_upper/to_lower для нелатинских строк.
+Или если вы хотите написать полнотекстовый поиск на эрланге :)
+</p>
+</div>
+</div>
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
