@@ -4,7 +4,9 @@
     <title>Киллер-фичи Erlang</title>
     <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
     <link rel="stylesheet" type="text/css" href="/css/main.css" />
-    <script type="text/javascript" src="/js/main.js"></script>
+    <link rel="stylesheet" href="/css/hl_styles/default.css">
+    <script src="/js/highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
   </head>
 <body>
 
@@ -60,7 +62,7 @@ Erlang. Очередной вводный доклад, каких было уж
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">-module(test).
+<pre><code class="erl">-module(test).
 -export([test/1, start/1, do_some_work/1]).
 
 test(Num) -&gt;
@@ -75,7 +77,7 @@ start(Num) -&gt;
 do_some_work(_N) -&gt;
     timer:sleep(20000),
     done.
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -93,8 +95,8 @@ do_some_work(_N) -&gt;
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">erl +P 1048576
-</pre>
+<pre><code class="erl">erl +P 1048576
+</code></pre>
 </div>
 
 <p>
@@ -169,7 +171,7 @@ do_some_work(_N) -&gt;
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">-module(test2).
+<pre><code class="erl">-module(test2).
 -export([start/1, do_some_work/1]).
 
 start(Num) -&gt;
@@ -180,7 +182,7 @@ do_some_work(_N) -&gt;
     Info = process_info(self(), [total_heap_size, heap_size, stack_size]),
     io:format("~p ~p~n", [self(), Info]),
     done.
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -190,11 +192,11 @@ do_some_work(_N) -&gt;
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">[{total_heap_size,233},
+<pre><code class="erl">[{total_heap_size,233},
  {heap_size,233},
  {stack_size,1},
  {memory,2696}]
-</pre>
+</code></pre>
 </div>
 
 <p>
