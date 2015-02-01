@@ -4,7 +4,9 @@
     <title>Unicode в Erlang</title>
     <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
     <link rel="stylesheet" type="text/css" href="/css/main.css" />
-    <script type="text/javascript" src="/js/main.js"></script>
+    <link rel="stylesheet" href="/css/hl_styles/default.css">
+    <script src="/js/highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
   </head>
 <body>
 
@@ -28,9 +30,7 @@ C этой темой я выступал на 7-й встрече <a href="http
 и более подробный.
 </p>
 
-<div id="outline-container-sec-2" class="outline-2">
 <h2>Вступление</h2>
-<div class="outline-text-2" id="text-2">
 <p>
 Не буду рассказывать общеизвестные вещи и пересказывать документацию,
 однако документация must read, поэтому ссылки даю:
@@ -46,8 +46,7 @@ C этой темой я выступал на 7-й встрече <a href="http
 И бонусом хорошее видео про Unicode:
 <a href="https://www.youtube.com/watch?v=MijmeoH9LT4">Characters, Symbols and the Unicode Miracle - Computerphile</a>
 </p>
-</div>
-</div>
+
 <div id="outline-container-sec-3" class="outline-2">
 <h2>Сразу немного практики</h2>
 <div class="outline-text-2" id="text-3">
@@ -82,9 +81,8 @@ C этой темой я выступал на 7-й встрече <a href="http
 <p>
 Модуль для теста будет очень простой:
 </p>
-<div class="org-src-container">
 
-<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
+<pre><code class="erl">%% -*- coding: utf-8 -*-
 -module(tu).
 -export([bin_default/0, bin_utf8/0, bin_utf16/0, bin_utf32/0, str_default/0,
          show/1, show_list/1, show_list/2]).
@@ -108,8 +106,7 @@ show_list(Bin) -&gt;
 
 show_list(Bin, Encoding) -&gt;
     show(unicode:characters_to_list(Bin, Encoding)).
-</pre>
-</div>
+</code></pre>
 
 <p>
 Небольшое теоретическое отступление, что такое <a href="http://www.erlang.org/doc/man/erl.html">флаг +pc</a>:
@@ -145,7 +142,7 @@ show_list(Bin, Encoding) -&gt;
 <div class="outline-text-3" id="text-3-1">
 <div class="org-src-container">
 
-<pre class="src src-Erlang">$ erl +pc unicode
+<pre><code class="erl">$ erl +pc unicode
 Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V6.2  (abort with ^G)
@@ -154,7 +151,7 @@ Eshell V6.2  (abort with ^G)
 
 2&gt; B = &lt;&lt;"привет"/utf8&gt;&gt;.
 &lt;&lt;"привет"/utf8&gt;&gt;
-</pre>
+</code></pre>
 </div>
 <p>
 Бинарник создан в консоли с указанием кодировки utf8. Он отобразился как &lt;&lt;"привет"/utf8&gt;&gt;,
@@ -163,14 +160,14 @@ Eshell V6.2  (abort with ^G)
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">3&gt; tu:show(B).
+<pre><code class="erl">3&gt; tu:show(B).
  W:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
  P:&lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
  S:Ð¿ÑÐ¸Ð²ÐµÑ
 TS:привет
 TP:&lt;&lt;"привет"/utf8&gt;&gt;
 ok
-</pre>
+</code></pre>
 </div>
 <p> Здесь мы видим результаты выполения io:format.</p>
 <p>~w и ~p показывают &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt; &#x2013; так и должен выглядеть utf8 побайтно.</p>
@@ -180,13 +177,13 @@ ok
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">4&gt; tu:show_list(B).
+<pre><code class="erl">4&gt; tu:show_list(B).
  W:[1087,1088,1080,1074,1077,1090]
  P:[1087,1088,1080,1074,1077,1090]
 TS:привет
 TP:"привет"
 ok
-</pre>
+</code></pre>
 </div>
 <p>
 Здесь мы видим, что получается после unicode:characters_to_list.
@@ -205,7 +202,7 @@ ok
 <div class="outline-text-3" id="text-3-2">
 <div class="org-src-container">
 
-<pre class="src src-Erlang">yura ~/tmp $ erl
+<pre><code class="erl">yura ~/tmp $ erl
 Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V6.2  (abort with ^G)
@@ -227,7 +224,7 @@ TS:привет
 TP:[1087,1088,1080,1074,1077,1090]
 ok
 5&gt;
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -245,7 +242,7 @@ io:format("~tp", [B]) теперь показывает &lt;&lt;208,191,209,128,
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">$ erl +pc unicode
+<pre><code class="erl">$ erl +pc unicode
 Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V6.2  (abort with ^G)
@@ -258,7 +255,7 @@ Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [
 Eshell V6.2  (abort with ^G)
 1&gt; B = tu:bin_utf8().
 &lt;&lt;208,191,209,128,208,184,208,178,208,181,209,130&gt;&gt;
-</pre>
+</code></pre>
 </div>
 </div>
 </div>
@@ -272,7 +269,7 @@ Eshell V6.2  (abort with ^G)
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">$ erl +pc unicode
+<pre><code class="erl">$ erl +pc unicode
 Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V6.2  (abort with ^G)
@@ -280,7 +277,7 @@ Eshell V6.2  (abort with ^G)
 &lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
 2&gt; B2 = &lt;&lt;"привет"/utf32&gt;&gt;.
 &lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
-</pre>
+</code></pre>
 </div>
 <p>
 Тут эвристика не работает, и независимо от флага +pc все равно показывается бинарник.
@@ -288,7 +285,7 @@ Eshell V6.2  (abort with ^G)
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">3&gt; tu:show(B1).
+<pre><code class="erl">3&gt; tu:show(B1).
  W:&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
  P:&lt;&lt;4,63,4,64,4,56,4,50,4,53,4,66&gt;&gt;
  S:^D?^D@^D8^D2^D5^DB
@@ -302,7 +299,7 @@ ok
 TS:^@^@^D?^@^@^D@^@^@^D8^@^@^D2^@^@^D5^@^@^DB
 TP:&lt;&lt;0,0,4,63,0,0,4,64,0,0,4,56,0,0,4,50,0,0,4,53,0,0,4,66&gt;&gt;
 ok
-</pre>
+</code></pre>
 </div>
 <p>
 io:format не может показать этот бинарник как строку, что понятно.
@@ -310,7 +307,7 @@ io:format не может показать этот бинарник как ст
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">5&gt; tu:show_list(B1, utf16).
+<pre><code class="erl">5&gt; tu:show_list(B1, utf16).
  W:[1087,1088,1080,1074,1077,1090]
  P:[1087,1088,1080,1074,1077,1090]
 TS:привет
@@ -322,7 +319,7 @@ ok
 TS:привет
 TP:"привет"
 ok
-</pre>
+</code></pre>
 </div>
 <p>
 Здесь нужен unicode:characters_to_list/2. И если кодировка указана правильно, то все ок.
@@ -344,13 +341,13 @@ ok
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">yura ~/tmp $ erl +pc unicode
+<pre><code class="erl">yura ~/tmp $ erl +pc unicode
 Erlang/OTP 17 [erts-6.2] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V6.2  (abort with ^G)
 1&gt; B = &lt;&lt;"привет"&gt;&gt;.
 &lt;&lt;"?@825B"&gt;&gt;
-</pre>
+</code></pre>
 </div>
 <p>
 Значение показано как строка, но неправильно.
@@ -358,14 +355,14 @@ Eshell V6.2  (abort with ^G)
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">2&gt; tu:show(B).
+<pre><code class="erl">2&gt; tu:show(B).
  W:&lt;&lt;63,64,56,50,53,66&gt;&gt;
  P:&lt;&lt;"?@825B"&gt;&gt;
  S:?@825B
 TS:?@825B
 TP:&lt;&lt;"?@825B"&gt;&gt;
 ok
-</pre>
+</code></pre>
 </div>
 <p>
 Видно, что в бинарнике по одному байту на символ. И это те байты, которые в utf16/utf32 стоят во 2-й/4-й позициях.
@@ -374,7 +371,7 @@ ok
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">4&gt; tu:show_list(B, utf8).
+<pre><code class="erl">4&gt; tu:show_list(B, utf8).
  W:[63,64,56,50,53,66]
  P:"?@825B"
  S:?@825B
@@ -406,7 +403,7 @@ ok
 TS:?@825B
 TP:"?@825B"
 ok
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -425,8 +422,8 @@ unicode:characters_to_list с указанием разных кодировок
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
-</pre>
+<pre><code class="erl">%% -*- coding: utf-8 -*-
+</code></pre>
 </div>
 <p>
 в первой строке модуля, то в R16 все будет работать так же, как в R17.
@@ -438,7 +435,7 @@ unicode:characters_to_list с указанием разных кодировок
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+<pre><code class="erl">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode
 Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V5.10.4  (abort with ^G)
@@ -459,7 +456,7 @@ ok
 TS:привет
 TP:"привет"
 ok
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -467,7 +464,7 @@ ok
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode                                                                                       :)
+<pre><code class="erl">yura ~/tmp $ /usr/local/lib/erlang_R16B03/bin/erl +pc unicode
 Erlang R16B03 (erts-5.10.4) [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 
 Eshell V5.10.4  (abort with ^G)
@@ -487,7 +484,7 @@ Eshell V5.10.4  (abort with ^G)
 TS:Ð¿ÑÐ¸Ð²ÐµÑ
 TP:[208,191,209,128,208,184,208,178,208,181,209,130]
 ok
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -506,10 +503,10 @@ R16 при компиляции считает, что файл модуля н�
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">bin_utf8() -&gt; &lt;&lt;"привет"/utf8&gt;&gt;.
+<pre><code class="erl">bin_utf8() -&gt; &lt;&lt;"привет"/utf8&gt;&gt;.
 bin_utf16() -&gt; &lt;&lt;"привет"/utf16&gt;&gt;.
 bin_utf32() -&gt; &lt;&lt;"привет"/utf32&gt;&gt;.
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -517,8 +514,8 @@ bin_utf32() -&gt; &lt;&lt;"привет"/utf32&gt;&gt;.
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">%% -*- coding: utf-8 -*-
-</pre>
+<pre><code class="erl">%% -*- coding: utf-8 -*-
+</code></pre>
 </div>
 <p>
 в начале файла.
@@ -608,14 +605,14 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">1&gt; string:tokens("http://google.com/?q=hello", "/").
+<pre><code class="erl">1&gt; string:tokens("http://google.com/?q=hello", "/").
 ["http:","google.com","?q=hello"]
 
 1&gt; S = unicode:characters_to_list(&lt;&lt;"Привет мир!"/utf8&gt;&gt;).
 "Привет мир!"
 2&gt; string:tokens(S, " ").
 ["Привет","мир!"]
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -623,13 +620,13 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">3&gt; Xml = "&lt;node1&gt;&lt;node2&gt;&lt;/node2&gt;&lt;/node1&gt;".
+<pre><code class="erl">3&gt; Xml = "&lt;node1&gt;&lt;node2&gt;&lt;/node2&gt;&lt;/node1&gt;".
 "&lt;node1&gt;&lt;node2&gt;&lt;/node2&gt;&lt;/node1&gt;"
 4&gt; string:tokens(Xml, "&lt;&gt;").
 ["node1","node2","/node2","/node1"]
 6&gt; string:tokens("1=2==3===4==5=6", "===").
 ["1","2","3","4","5","6"]
-</pre>
+</code></pre>
 </div>
 <p>
 Если нужно разбиение по подстроке, то придется писать кастомную функцию.
@@ -640,9 +637,9 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">7&gt; string:join(["item1", "item2", "item3"], ", ").
+<pre><code class="erl">7&gt; string:join(["item1", "item2", "item3"], ", ").
 "item1, item2, item3"
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -650,7 +647,7 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">8&gt; S2 = "    bla bla bla   ".
+<pre><code class="erl">8&gt; S2 = "    bla bla bla   ".
 "    bla bla bla   "
 9&gt; string:strip(S2).
 "bla bla bla"
@@ -662,7 +659,7 @@ latin1_chardata() | chardata() | external_chardata()
 "bla bla bla"
 13&gt; string:strip("---bla-bla-bla----", both, $-).
 "bla-bla-bla"
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -670,7 +667,7 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">14&gt; string:chr("Hello", $e).
+<pre><code class="erl">14&gt; string:chr("Hello", $e).
 2
 15&gt; string:rchr("Hello", $e).
 2
@@ -678,7 +675,7 @@ latin1_chardata() | chardata() | external_chardata()
 3
 17&gt; string:rstr("Hello", "llo").
 3
-</pre>
+</code></pre>
 </div>
 
 
@@ -687,14 +684,14 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">19&gt; string:to_upper("Hello").
+<pre><code class="erl">19&gt; string:to_upper("Hello").
 "HELLO"
 20&gt; string:to_lower("Hello").
 "hello"
 21&gt; string:to_upper("Привет").
 "Привет"
 22&gt; string:to_lower("Привет").
-</pre>
+</code></pre>
 </div>
 <p>
 Работает только с латинскими символами, остальные не меняет.
@@ -708,7 +705,7 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">25&gt; string:to_integer("123").
+<pre><code class="erl">25&gt; string:to_integer("123").
 {123,[]}
 26&gt; string:to_integer("123aaa").
 {123,"aaa"}
@@ -730,7 +727,7 @@ latin1_chardata() | chardata() | external_chardata()
    exception error: bad argument
      in function  list_to_float/1
         called as list_to_float("3")
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -789,13 +786,13 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">58&gt; B = &lt;&lt;"Привет"/utf8&gt;&gt;.
+<pre><code class="erl">58&gt; B = &lt;&lt;"Привет"/utf8&gt;&gt;.
 &lt;&lt;"Привет"/utf8&gt;&gt;
 59&gt; S1 = unicode:characters_to_list(B).
 "Привет"
 60&gt; S2 = binary_to_list(B).
 [208,159,209,128,208,184,208,178,208,181,209,130]
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -809,7 +806,7 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">61&gt; Name = "Вася".
+<pre><code class="erl">61&gt; Name = "Вася".
 "Вася"
 62&gt; "My name is " ++ Name.
 "My name is Вася"
@@ -819,7 +816,7 @@ latin1_chardata() | chardata() | external_chardata()
 5
 65&gt; "SELECT name FROM " ++ Table ++ " WHERE id = " ++ integer_to_list(Id).
 "SELECT name FROM users WHERE id = 5"
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -827,11 +824,11 @@ latin1_chardata() | chardata() | external_chardata()
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">66&gt; L1 = ["My name is ", Name].
+<pre><code class="erl">66&gt; L1 = ["My name is ", Name].
 ["My name is ","Вася"]
 67&gt; L2 = ["SELECT name FROM ", Table, " WHERE id = ", integer_to_list(Id)].
 ["SELECT name FROM ","users"," WHERE id = ","5"]
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -841,11 +838,11 @@ iolist можно долго формировать из разных куско
 </p>
 <div class="org-src-container">
 
-<pre class="src src-Erlang">68&gt; lists:flatten(L1).
+<pre><code class="erl">68&gt; lists:flatten(L1).
 "My name is Вася"
 69&gt; unicode:characters_to_binary(L2).
 &lt;&lt;"SELECT name FROM users WHERE id = 5"&gt;&gt;
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -867,7 +864,7 @@ iolist можно долго формировать из разных куско
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">1&gt; {ok, P} = re:compile(&lt;&lt;"^привет.*"/utf8&gt;&gt;, [unicode]).
+<pre><code class="erl">1&gt; {ok, P} = re:compile(&lt;&lt;"^привет.*"/utf8&gt;&gt;, [unicode]).
 {ok,{re_pattern,0,1,0,
                 &lt;&lt;69,82,67,80,92,0,0,0,16,8,0,0,1,0,0,0,255,255,255,255,
                   255,255,...&gt;&gt;}}
@@ -894,7 +891,7 @@ nomatch
 "мир"
 10&gt; re:run(S2, P).
 nomatch
-</pre>
+</code></pre>
 </div>
 
 <p>
@@ -904,14 +901,14 @@ nomatch
 
 <div class="org-src-container">
 
-<pre class="src src-Erlang">94&gt; {ok, P3} = re:compile(&lt;&lt;"хорош"/utf8&gt;&gt;).
+<pre><code class="erl">94&gt; {ok, P3} = re:compile(&lt;&lt;"хорош"/utf8&gt;&gt;).
 {ok,{re_pattern,0,0,0,
                 &lt;&lt;69,82,67,80,91,0,0,0,0,0,0,0,81,0,0,0,255,255,255,255,
                   255,255,...&gt;&gt;}}
 95&gt;
 95&gt; re:replace(&lt;&lt;"Эрланг хорош"/utf8&gt;&gt;, P3, &lt;&lt;"прекрасен"/utf8&gt;&gt;).
 [&lt;&lt;"Эрланг "/utf8&gt;&gt;,&lt;&lt;"прекрасен"/utf8&gt;&gt;]
-</pre>
+</code></pre>
 </div>
 
 <p>

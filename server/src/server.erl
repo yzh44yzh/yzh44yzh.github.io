@@ -18,7 +18,7 @@ start() ->
     ok.
 
 routes()->
-    Root = "/home/yura/p/yzh44yzh/",
+    Root = "../",
     [{'_',
       [
        {"/", cowboy_static, {file, Root ++ "index.html", [{mimetypes, cow_mimetypes, all}]}},
