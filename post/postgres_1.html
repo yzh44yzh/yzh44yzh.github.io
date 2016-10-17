@@ -1,0 +1,435 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>PostgreSQL. Как правильно хранить котов, история одной миграции.</title>
+    <link rel="stylesheet" type="text/css" href="/css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="/css/main.css" />
+    <script type="text/javascript" src="/js/main.js"></script>
+  </head>
+<body>
+
+  <div id="header">
+    <div id="main_title">
+      <a href="/" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+      <a href="https://plus.google.com/u/0/+YuriZhloba/about" style="color:#013;">Юра Жлоба</a>
+    </div>
+  </div>
+
+<div id="content">
+
+<h1>PostgreSQL. Как правильно хранить котов, история одной миграции.</h1>
+<p><i>17 октября 2016</i><p>
+
+<p>История взята из реального проекта. Но поскольку реальный проект слишком скучный (<i>и под DNA</i>), то в этой статье используется упрощенный пример.</p>
+
+<p>Жил-был один проект. И была у него база данных. И была в базе таблица для хранения, ну, скажем, котов. Вот такая:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TABLE cats (
+        id serial,
+        cname varchar(20),
+        ctype varchar(20),
+        primary key(id)
+    );
+</pre>
+</div>
+</p>
+
+<p>Все довольно просто: у каждого кота есть id, имя, и некий тип.</p>
+
+<p>Конечно, у нас были бизнес требования к котам и их типам. Например, мы точно знали, что у нас есть типы <b>big furry</b>, <b>neko</b> и <b>sudden danger</b>. И предполагали, что еще могут быть типы <b>long tail</b> и <b>sleeper-eater</b>. Но мы ожидали, что требования будут меняться. И пока не известно, какие в итоге понадобятся типы. Поэтому использовали тип данных <b>varchar(20)</b>.</p>
+
+<p>Спустя долгое время и несколько релизов мы, наконец, составили точный список типов котов. К этому времени в таблице уже было несколько десятков миллионов котов с самыми разными типами, многие из которых устарели. Нужно было навести порядок, привести все значения в таблице в соответствие с новыми требованиями.</p>
+
+<p>Мы решали эту проблему не так старательно и педантично, как описано в данной статье. Но давайте притворимся, что именно так все и делалось в реальном проекте :)</p>
+
+<p>Итак, применим инженерный подход:
+<ul>
+<li>построим теорию,</li>
+<li>проверим ее экспериментами,</li>
+<li>разработаем практическое решение на базе теории,</li>
+<li>применим решение и оценим результат.</li>
+</ul>
+</p>
+
+
+<h2>Строим теорию</h2>
+
+<p>Создадим ENUM-тип данных и перечислим в нем допустимые значения. Затем выполним миграцию:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TYPE cat_type AS ENUM ('big furry', 'small red', 'long tail', 'crafty hunter', 'sudden danger', 'sleeper-eater');
+    ALTER TABLE cats ALTER COLUMN ctype TYPE cat_type USING ctype::cat_type;
+</pre>
+</div>
+</p>
+
+<p>Мы еще не знаем, что в таком виде миграция не сработает. Забыли про уже существующие в таблице недопустимые значения. Узнаем об этом позже, когда попробуем применить миграцию :)</p>
+
+<p>Таким образом мы запретим создание котов с недопустимым значением типа. А еще мы уменьшим размер таблицы и размер индекса по полю <b>ctype</b>. Размер таблицы не так уж и важен, а вот уменьшение размера индекса – это хорошо. Мы уже имели дело с индексами, которые не помещаются в оперативной памяти. И это не очень полезные индексы :)</p>
+
+<p>Давайте оценим, какого выигрыша по памяти можно ожидать.</p>
+
+<p>Для хранения значения типа varchar выделяется 1-4 байта на символ (в зависимости от кодировки) и еще 1 или 4 байта на хранение длины строки (<a href="https://www.postgresql.org/docs/current/static/datatype-character.html">подробнее тут</a>). В нашем случае это 1 байт на символ (utf8, латинские буквы) и 1 байт на длину строки. Строки длиной 9-14 символов. Будем считать, что в среднем у нас 12 байт на одно значение.</p>
+
+<p>
+<div class="org-src-container">
+<pre class="src src-Sql">
+    > select pg_column_size('big furry');
+    10
+    > select pg_column_size('sleeper-eater');
+    14
+</pre>
+</div>
+</p>
+
+<p>Известно, что значения enum занимают 4 байта независимо от их длины:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    > select pg_column_size('big furry'::cat_type);
+    4
+    > select pg_column_size('sleeper-eater'::cat_type);
+    4
+</pre>
+</div>
+</p>
+
+<p>Одна строка в таблице занимает:
+<ul>
+<li>27 байт на заголовок строки,</li>
+<li>8 байт id,</li>
+<li>21 байт cname (считаем, что у всех котов имена по 20 символов),</li>
+<li>12 байт ctype</li>
+</ul>
+Итого: 68 байт.
+</p>
+
+<p>После миграции будет 27 + 8 + 21 + 4 = 60 байт. Разница небольшая, но для 50 млн строк суммарный выигрыш должен быть существенным.</p>
+
+<p>У нас 2 индекса, по id и по ctype. Индекс по id не изменится. Индекс по ctype должен уменьшится. Как устроена память индекса мы не знаем, но ожидаем, что если одно значение уменьшилось в 3 раза, то и индекс уменьшится в 2-3 раза.</p>
+
+
+<h2>Эксперимент №1</h2>
+
+<p>Для эксперимента создадим две таблицы:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TABLE cats1 (
+        id serial,
+        name varchar(20),
+        type varchar(20),
+        primary key(id)
+    );
+
+    CREATE TYPE cat_type AS ENUM ('big furry', 'small red', 'long tail',
+                                  'crafty hunter', 'sudden danger', 'sleeper eater');
+    CREATE TABLE cats2 (
+        id serial,
+        name varchar(20),
+        type cat_type,
+        primary key(id)
+    );
+</pre>
+</div>
+</p>
+
+<p>Заполним их тестовыми данными:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE SEQUENCE ss;
+
+    INSERT INTO cats1 (name, type)
+        SELECT
+            substring(md5(random()::text), 0, 20),
+            (ARRAY['big furry', 'small red', 'long tail',
+                   'crafty hunter', 'sudden danger', 'sleeper eater'])
+                [nextval('ss') % 5 + 1]
+        FROM
+            generate_series(1, 500000);
+
+    INSERT INTO cats2 (name, type)
+        SELECT
+            substring(md5(random()::text), 0, 20),
+            ((ARRAY['big furry', 'small red', 'long tail',
+                    'crafty hunter', 'sudden danger', 'sleeper eater'])
+                [nextval('ss') % 5 + 1])::cat_type
+        FROM
+            generate_series(1, 500000);
+</pre>
+</div>
+</p>
+
+<p>Да, имена у наших котов довольно странные. Но для эксперимента годятся :)</p>
+
+<p>Создадим индексы:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE INDEX cats1_index ON cats1(type);
+    CREATE INDEX cats2_index ON cats2(type);
+</pre>
+</div>
+</p>
+
+<p>И посмотрим, сколько памяти они заняли:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    SELECT pg_relation_size('cats1') AS table_size,
+           pg_indexes_size('cats1') AS indexes_size;
+    SELECT pg_relation_size('cats2') AS table_size,
+           pg_indexes_size('cats2') AS indexes_size;
+</pre>
+</div>
+</p>
+
+<p>Теоретически строки в первой таблице занимают 68 * 500,000 = 34,000,000 байт, во второй таблице 60 * 500,000 = 30,000,000 байт. На практике видим 34,136,064 и 30,121,984 байт. Цифры получились близкие.</p>
+
+<p>Понятно, что таблица устроена сложнее, чем просто 500,000 строк равномерно одна за другой. Там выделяются страницы памяти по 8 Кб. У страниц есть свои заголовки и другая метаинформация. Да и значения в строках как-то выравниваются (<a href=" https://www.postgresql.org/docs/9.5/static/storage-page-layout.html">подробнее тут</a>).
+
+<p>Но что у нас с индексами?</p>
+
+<p>Функция <b>pg_indexes_size</b> показывает расход памяти суммарно по всем индексам, связанным с таблицей, а не по каждому отдельно. Но это не беда, мы можем вызвать ее до создания индекса по ctype и после. <i>(В <b>psql</b> есть команда <b>\diS+ index_name</b>, которая показывает размер конкретного индекса. Но на момент написания статьи я об этом не знал.)</i> И тогда увидим, что индекс по id занимает 11,255,808 байт, а индексы по ctype для первой таблицы – 15,794,176 байт, а для второй таблицы – 11,255,808 байт.</p>
+
+
+
+<p>Заметно меньше, но не в 2-3 раза, как мы ожидали. Почему так?</p>
+
+
+<h2>Эксперимент №2</h2>
+
+<p>Создадим несколько простых таблиц, содержащих только один столбец:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TABLE t_bool (f bool);
+    CREATE TABLE t_sint (f smallint);
+    CREATE TABLE t_int (f int);
+    CREATE TABLE t_bint (f bigint);
+    CREATE TABLE t_c7 (f char(7));
+    CREATE TABLE t_c8 (f char(8));
+    CREATE TABLE t_c9 (f char(9));
+    CREATE TABLE t_c15 (f char(15));
+    CREATE TABLE t_c16 (f char(16));
+    CREATE TABLE t_c20 (f char(20));
+</pre>
+</div>
+</p>
+
+<p>Заполним их данными:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    INSERT INTO t_bool (f)
+        SELECT true FROM generate_series(1, 500000);
+    INSERT INTO t_sint (f)
+        SELECT 1 FROM generate_series(1, 500000);
+    ...
+    INSERT INTO t_c7 (f)
+        SELECT 'abcdefg' FROM generate_series(1, 500000);
+    ...
+    INSERT INTO t_c20 (f)
+        SELECT 'abcd efgh abcd efgh ' FROM generate_series(1, 500000);
+</pre>
+</div>
+</p>
+
+<p>Создадим индексы:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE INDEX ON t_bool(f);
+    CREATE INDEX ON t_sint(f);
+    ...
+    CREATE INDEX ON t_c20(f);
+</pre>
+</div>
+</p>
+
+<p>И посмотрим, сколько места занимают таблица и индекс:
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+    <thead><tr>
+        <th>Тип данных</th>
+        <th>Байт на одно значение</th>
+        <th>Размер таблицы</th>
+        <th>Размер индекса</th>
+    </tr></thead>
+    <tbody>
+    <tr><td>bool</td><td>1</td><td>18,128,896</td><td>11,255,808</td></tr>
+    <tr><td>smallint</td><td>2</td><td>18,128,896</td><td>11,255,808</td></tr>
+    <tr><td>int</td><td>4</td><td>18,128,896</td><td>11,255,808</td></tr>
+    <tr><td>bigint</td><td>8</td><td>18,128,896</td><td>11,255,808</td></tr>
+    <tr><td>char(7)</td><td>8</td><td>18,128,896</td><td>11,255,808</td></tr>
+    <tr><td>char(8)</td><td>9</td><td>22,142,976</td><td>15,794,176</td></tr>
+    <tr><td>char(9)</td><td>10</td><td>22,142,976</td><td>15,794,176</td></tr>
+    <tr><td>char(15)</td><td>16</td><td>22,142,976</td><td>15,794,176</td></tr>
+    <tr><td>char(16)</td><td>17</td><td>26,091,520</td><td>20,332,544</td></tr>
+    <tr><td>char(20)</td><td>21</td><td>26,091,520</td><td>20,332,544</td></tr>
+    </tbody>
+</table>
+</p>
+
+<p>Видим, что размеры таблицы и индекса одинаковые в диапазонах значений 1-8 байт, 9-16 байт и больше 16 байт.</p>
+
+<p>Похоже, что мелочные оптимизации, такие как замена int на smallint, дают мало пользы. Ну разве что в отдельных случаях, когда в одной таблице есть много столбцов, которые можно так оптимизировать.</p>
+
+<p>Замена varchar на enum дает выигрыш, если varchar значения в среднем больше 8 байт (длинее 7-ми символов).</p>
+
+
+<h2>Разрабатываем практическое решение</h2>
+
+<p>Теперь мы знаем, что ожидать на практике, и готовы реализовать нашу миграцию.</p>
+
+<p>Возвращаемся к нашим котам:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TABLE cats (
+        id serial,
+        cname varchar(20),
+        ctype varchar(20),
+        primary key(id)
+    );
+    CREATE INDEX c1 ON cats(ctype);
+</pre>
+</div>
+</p>
+
+<p>Наполняем таблицу данными так, чтобы в ней были невалидные и NULL значения.
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE SEQUENCE ss;
+
+    INSERT INTO cats (cname, ctype)
+        SELECT
+            substring(md5(random()::text), 0, 20),
+            (ARRAY['big furry', 'small red', 'long tail', 'crafty hunter', 'sudden danger',
+                   'sleeper-eater', 'black eye', 'sharp claw', 'neko', NULL])
+                [nextval('ss') % 10 + 1]
+        FROM
+            generate_series(1, 500000);
+</pre>
+</div>
+</p>
+
+<p>Пробуем мигрирововать:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE TYPE cat_type AS ENUM ('big furry', 'small red', 'long tail',
+                                  'crafty hunter', 'sudden danger', 'sleeper-eater');
+    ALTER TABLE cats ALTER COLUMN ctype TYPE cat_type USING ctype::cat_type;
+</pre>
+</div>
+</p>
+
+<p>И выясняем, что наш наивный ALTER TABLE не работает:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    ERROR:  invalid input value for enum cat_type: "black eye"
+</pre>
+</div>
+</p>
+
+<p>И нужно писать функцию для преобразования типа:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE OR REPLACE FUNCTION cast_to_cat_type(ctype varchar) RETURNS cat_type AS
+    $$
+    DECLARE res cat_type;
+    BEGIN
+        CASE ctype
+            WHEN 'big furry' THEN res := 'big furry';
+            WHEN 'small red' THEN res := 'small red';
+            WHEN 'long tail' THEN res := 'long tail';
+            WHEN 'crafty hunter' THEN res := 'crafty hunter';
+            WHEN 'sudden danger' THEN res := 'sudden danger';
+            WHEN 'sleeper-eater' THEN res := 'sleeper-eater';
+            ELSE res := NULL;
+        END CASE;
+        RETURN res;
+    END
+    $$
+    LANGUAGE plpgsql;
+</pre>
+</div>
+</p>
+
+<p>И пробуем еще раз:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    ALTER TABLE cats ALTER COLUMN ctype TYPE cat_type USING cast_to_cat_type(ctype);
+</pre>
+</div>
+</p>
+
+<p>На этот раз сработало.</p>
+
+<p>Только показывать кому-то такую функцию стыдно. Ой, кажется я только что выдал свою тайную склонность к копипасте. Тсс, давайте притворимся, что я этого не писал, а вы этого не видели, ок? А я напишу по-другому:</p>
+
+<p>
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE OR REPLACE FUNCTION cast_to_cat_type(ctype varchar) RETURNS cat_type AS
+    $$
+    DECLARE res cat_type;
+    BEGIN
+        BEGIN
+            res := ctype::cat_type;
+        EXCEPTION WHEN others THEN
+            res := NULL;
+        END;
+        RETURN res;
+    END
+    $$
+    LANGUAGE plpgsql;
+</pre>
+</div>
+</p>
+
+<p>Вот это можно смело отправлять на code review.</p>
+
+
+<h2>Оцениваем результат</h2>
+
+<p>Что же у нас получилось в итоге? Размеры таблицы и индексов до миграции: 33,038,336 и 26,140,672 байт. После миграции: 28,581,888 и 22,511,616 байт. Учитывая, что в реальной таблице у нас не 500 тыс записей, а 50 миллионов, выигрыш будет существенный.</p>
+
+<p>Но при некоторых условиях можно выиграть еще больше. Допустим, бизнес не интересуют коты неправильного или неизвестного типа, в запросах они исключаются. Тогда можно исключить их и из индекса.</p>
+
+<p>Используем <a href="https://www.postgresql.org/docs/current/static/indexes-partial.html">частичный индекс</a>:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    CREATE index CONCURRENTLY c2 ON cats(ctype) WHERE ctype IS NOT NULL;
+    DROP index c1;
+</pre>
+</div>
+</p>
+
+<p>И теперь размер индексов 18,014,208 байт. Тут, конечно, все будет зависеть от того, как много котов у нас оказались неправильными.</p>
+
+<p>Любопытный вопрос, что дальше делать с неправильными котами. Но это уже вопрос к бизнесу, не к разработчику :)</p>
+
+<p>Осталось убедиться, что правильные значения в таблицу вставляются, а неправильные не вставляются:
+<div class="org-src-container">
+<pre class="src src-Sql">
+    > INSERT INTO cats (cname, ctype) VALUES ('Murzik', 'crafty hunter'), ('Vasjka', 'sleeper-eater');
+    INSERT 0 2
+    > INSERT INTO cats (cname, ctype) VALUES ('Sharik', 'big dog');
+    ERROR:  invalid input value for enum cat_type: "big dog"
+</pre>
+</div>
+</p>
+
+<p>Все работает как надо.</p>
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
