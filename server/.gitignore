@@ -1,3 +1,4 @@
 erl_crash.dump
-deps
+_build
 ebin
+rebar.lock
