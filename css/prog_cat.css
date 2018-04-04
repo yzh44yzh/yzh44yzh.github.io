@@ -1,0 +1,23 @@
+body {
+    background-color: #fff;
+    margin: 4em;
+    margin-top: 2em;
+}
+
+p {
+    font-size: medium;
+}
+
+.pcat-header {
+    margin-bottom: 2em;
+}
+
+.pcat-footer {
+    margin-top: 2em;
+    margin-bottom: 2em;
+    padding-left: 1em;
+}
+
+.ui.segments {
+    margin-top:2em;
+}
