@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
 # TODO
-# navigation links, active link
-# about page
+# author page, also active link for this page
 # save all pages to files
 # check navigation works
 # rename index.html to archive.html, season_00.html to index.html, fix navigation
@@ -26,7 +25,7 @@ model = [
         'template': 'data/prog_cat/template.html',
         'bindings': {
             'title': 'Сезон #01.',
-            'date': '???'
+            'date': '4 августа 2016'
         }
     },
     {
@@ -35,13 +34,42 @@ model = [
         'template': 'data/prog_cat/template.html',
         'bindings': {
             'title': 'Сезон #02.',
-            'date': '???'
+            'date': '2 июня 2017'
+        }
+    },
+    {
+        'input': 'data/prog_cat/season_03.txt',
+        'output': 'season_03.html',
+        'template': 'data/prog_cat/template.html',
+        'bindings': {
+            'title': 'Сезон #03.',
+            'date': '24 ноября 2017'
+        }
+    },
+    {
+        'input': 'data/prog_cat/season_04.txt',
+        'output': 'season_04.html',
+        'template': 'data/prog_cat/template.html',
+        'bindings': {
+            'title': 'Сезон #04.',
+            'date': '28 марта 2018'
         }
     }
 ]
 
+navigation = []
+for data in model:
+    navigation.append({
+        'href': data['output'],
+        'text': data['bindings']['title']
+        })
+
+
 def make_page(index, data):
     data['bindings']['episodes'] = get_episodes(data['input'], index)
+    for item in navigation:
+        item['active'] = item['text'] == data['bindings']['title']
+    data['bindings']['navigation'] = navigation
     template = get_template(data['template'])
     page = pystache.render(template, data['bindings'])
     print(page)
@@ -73,4 +101,4 @@ def get_template(template_file):
     fd = open(template_file, 'r')
     return fd.read()
 
-make_page(2, model[2])
+make_page(4, model[4])

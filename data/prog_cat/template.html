@@ -13,15 +13,13 @@
 </div>
 
 <div class="ui orange inverted menu">
-  <a href="#" class="item active">Сезон #00</a>
-  <a href="#" class="item">Сезон #01</a>
-  <a href="#" class="item">Сезон #02</a>
-  <a href="#" class="item">Сезон #03</a>
-  <a href="#" class="item">Сезон #04</a>
-  <div class="right menu">
-      <a href="#" class="item">Автор</a>
-      <a href="#" class="item">Архив</a>
-  </div>
+    {{#navigation}}
+    <a href="{{#active}}#{{/active}}{{^active}}{{href}}{{/active}}" class="item{{#active}} active{{/active}}">{{text}}</a>
+    {{/navigation}}
+    <div class="right menu">
+        <a href="author.html" class="item">Автор</a>
+        <a href="archive.html" class="item">Архив</a>
+    </div>
 </div>
 
 {{#episodes}}
