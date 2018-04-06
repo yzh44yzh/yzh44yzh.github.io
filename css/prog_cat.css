@@ -21,3 +21,7 @@ p {
 .ui.segments {
     margin-top:2em;
 }
+
+.item {
+    font-size: medium;
+}
