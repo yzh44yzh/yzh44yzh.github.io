@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 
-# TODO
-# - rename index.html to archive.html, season_00.html to index.html, check navigation again
-# - fix navigation for ./post/*.html pages, links to archive.html instead of index.html
-
 import pystache
 
 model = [
     {
         'input': 'data/prog_cat/season_00.txt',
-        'output': 'season_00.html', # TODO index.html
+        'output': 'index.html',
         'bindings': {
             'title': 'Сезон #00',
             'date': '23 апреля 2016',
