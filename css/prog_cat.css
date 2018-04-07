@@ -18,6 +18,12 @@ p {
     padding-left: 1em;
 }
 
+.pcat-img-title {
+    padding-left:20px;
+    vertical-align:top;
+    font-size: large;
+}
+
 .ui.segments {
     margin-top:2em;
 }

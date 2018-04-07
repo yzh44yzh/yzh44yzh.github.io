@@ -2,14 +2,14 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Коты-программисты. {{title}}</title>
+    <title>Коты-программисты. {{title}}.</title>
     <link rel="stylesheet" type="text/css" href="./css/semantic.min.css">
     <link rel="stylesheet" type="text/css" href="./css/prog_cat.css">
 </head>
 <body>
 
 <div class="pcat-header">
-    <h1>Коты-программисты. {{title}}</h1>
+    <h1>Коты-программисты. {{title}}.</h1>
 </div>
 
 <div class="ui orange inverted menu">
@@ -17,7 +17,8 @@
     <a href="{{#active}}#{{/active}}{{^active}}{{href}}{{/active}}" class="item{{#active}} active{{/active}}">{{text}}</a>
     {{/navigation}}
     <div class="right menu">
-        <a href="author.html" class="item">Автор</a>
+        <a href="{{#author_page}}#{{/author_page}}{{^author_page}}author.html{{/author_page}}"
+           class="item{{#active}} active{{/active}}">Авторы</a>
         <a href="archive.html" class="item">Архив</a>
     </div>
 </div>
@@ -33,9 +34,13 @@
 </div>
 {{/episodes}}
 
+{{{author_content}}}
+
+{{^author_page}}
 <div class="pcat-footer">
     <p><i>{{date}}</i></p>
 </div>
+{{/author_page}}
 
 </body>
 </html>
