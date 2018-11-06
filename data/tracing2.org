@@ -1,0 +1,278 @@
+* Интроспекция и трассировка эрланг-сервиса на примере реального проекта
+
+Те, кто что-то слышал про Эрланг, наверняка слышали и про то, что Эрланг позволяет подключиться к работающей ноде на проде, и в реальном времени получать много информации о происходящем. Можно следить за тем, с каким аргументами вызываются функции и что они возвращают. Можно следить за созданием и завершением процессов. Можно видеть сообщения, которые передаются между процессами, и их состояния. Про такие мелочи, как нагрузка на CPU, расход памяти и срабатывания сборщика мусора можно даже и не упоминать.
+
+Мы запустим реальный проект, подадим на него пользовательские запросы, подключимся к ноде, и посмотрим в реальности, что интересного можно узнать и сделать внутри эрланговского сервиса.
+
+
+** TODO:
+- прочитать материалы, набросать черновик
+  + Stuff Goes Bad: Erlang in Anger. Fred Hebert. chapter 9 (есть записи на телефоне)
+  - http://yzh44yzh.github.io/post/trace_dbg.html
+  - Armstrong. chapter 21
+  - Cesarini. chapter 17
+  - Designing for Scalability with Erlang/OTP. chapter 5
+  - Erlang and OTP in Action. chapter 14
+  - доки
+    - erlang:trace http://erlang.org/doc/man/erlang.html#trace-3
+    - erlang:trace_pattern http://erlang.org/doc/man/erlang.html#trace_pattern-3
+    - dbg http://www.erlang.org/doc/man/dbg.html
+    - match spec http://erlang.org/doc/apps/erts/match_spec.html
+  - https://www.youtube.com/watch?v=4u6c2FNauYE&list=UUKrD_GYN3iDpG_uMmADPzJQ
+  - https://www.youtube.com/watch?v=nLtFP7M9d88&list=UUKrD_GYN3iDpG_uMmADPzJQ
+  - Про эрланг vs XXX: интроспекция для отладки. Макс Лапшин.
+    https://levgem.livejournal.com/463349.html
+  - все материалы в закладках toread/erlang/tracing_and_monitoring
+- презентация
+- практика
+- чистовик (не обязательно должен быть готов к 12-му)
+
+Этапы:
+- выступление на митапе FuncBy 12-го
+- выступление на внутреннем митапе
+- запись скринкаста
+- пост в блог с теорией и практикой в скринкасте
+
+
+** Теория
+
+*** Трейсинг
+
+Традиционно у разработчика есть 2 средства для изучения системы на проде -- это логи и метрики.
+Логи либо на целевой машине, либо куда-то собираются с нескольких машин.
+Метрики где-нибудь в графане, с одной или с нескольких машин.
+
+TODO: картинки:
+- графана с какими-то графиками
+- tail -f info.log с каким-то выводом (от system.marfa или нагрузочного агента)
+
+Это мощные инструменты, и с ними многое можно сделать.
+
+Но у эрланга есть больше возможностей. Мы можем подключиться консолью к ноде на удаленной машине.
+Что можно сделать?
+- изучать текущее состояние системы -- интроспекция
+- наблюдать изменение системы в динамике -- трассировка
+- активно модифицировать систему -- (хз, как это назвать)
+  на проде такое делать опасно, и обычно не нужно. Но иногда, если очень надо, то можно сделать.
+
+Мы всем этим займемся в практической части. Но сперва немного теории.
+
+Трассировка -- отслеживание изменений в системе (событий)
+главная проблема -- в огромном потоке событий выбрать то, что нужно
+
+Сама по себе трассировка на производительность влияет мало.
+Но при этом может генерироваться очень большое количество событий.
+Они могут нагрузить io, переполнить память и сделать невозможным ввод с консоли.
+
+The Erlang Trace BIFs allow to trace any Erlang code at all
+They work in two parts: pid specifications, and trace patterns.
+
+Pid specifications lets the user decide which processes to target.
+specific pids, all pids, existing pids, or new pids
+
+Functions can be specified in two parts:
+- specifying the modules, functions, and arity,
+- Erlang match specifications to add constraints to arguments
+  http://erlang.org/doc/apps/erts/match_spec.html
+
+What defines whether a specific function call gets traced or not is the intersection of both
+и тут картинка с двумя пересекающимися кругами
+
+trace_patter/dbg создают стейт трассировки, и модифицируют его на протяжении сессии
+этот стейт явно посмотреть нельзя, приходится помнить, с какими опциями делались вызовы
+You specify sets of matching pids and sets of trace patterns independently
+и потом трассировку нужно правильно остановить
+
+recon_trace/redbug стейт создается одним вызовом
+следущий вызов очищает предыдущий стейт и создает новый
+
+Что можно увидеть для процессов:
+- send, 'receive' – отправка/получение сообщений
+- procs – события жизненного цикла процесса:
+  spawn, exit, register, unregister
+  и связи между процессами:
+  link, unlink, getting_linked, getting_unlinked,
+- running – работа планировщика процессов
+- garbage_collection – сборка мусора
+
+Что можно увидеть для функций:
+- аргументы
+- возвращаемое значение
+- пид процесса
+- caller (из какой функции был вызов)
+- process dump
+- стэктрейс (только redbug)
+- ?
+
+что такое global и local scope
+
+События трассировки можно направить в кастомную функцию, и потом как-то обрабатывать
+(сохранять в БД, передавать в elastic search, whatever)
+можно захадркодить в проекте включение/выключение трассировки с определенными настройками
+И потом в рантайме при каких-то условиях включать это (вручную или автоматически).
+
+*** проект cat_traveler
+
+бизнес требования
+
+
+*** system.marfa
+
+api, устройство
+
+
+*** load.agent
+
+
+
+** Практика
+
+*** Observer
+
+и для system.marfa (там стейт интереснее), и для load.agent (там процессов больше)
+
+
+*** Redbug
+
+https://github.com/massemanet/redbug
+
+```
+redbug:start("cat_traveler:enter/2 -> return", [{time, 15000}, {msgs, 10}]).
+```
+Приходит 2 сообщения на каждый вызов. В одном сообщении аргументы, в другом возвращаемое значение.
+
+```
+% 00:44:52 <0.1297.0>({cowboy_stream_h,request_process,3})
+% cat_traveler:enter({cat,<<"Murka">>}, {town,<<"Minsk">>})
+
+% 00:44:52 <0.1297.0>(dead)
+% cat_traveler:enter/2 -> ok
+```
+В первой строке инфа о процессе, в котором сработала функция. Его пид и функция, с которой он стартовал.
+Во второй строке вызываемая функция с аргументами.
+
+
+```
+redbug:start("cat_traveler:enter({cat,<<\"Tihon\">>}, _) -> return", [{time, 15000}, {msgs, 10}]).
+```
+
+```
+redbug:start("cat_traveler:enter/2 -> stack,return", [{time, 15000}, {msgs, 10}]).
+```
+
+Приходят 2 события. В первом агрументы и стэк. Во втором возвращаемый результат.
+```
+% 23:41:44 <0.585.0>({cowboy_stream_h,request_process,3})
+% cat_traveler:enter({cat,<<"Marfa">>}, {town,<<"Amsterdam">>})
+  proc_lib:init_p_do_apply/3
+  cowboy_stream_h:request_process/3
+  cowboy_stream_h:execute/3
+  cowboy_handler:execute/2
+  ct_handler_api:init/2
+
+% 23:41:44 <0.585.0>(dead)
+% cat_traveler:enter/2 -> ok
+```
+
+Note that not all functions in the call chain are on the stack,
+only functions we will return to (this is a consequence of tail call optimization.)
+
+
+*** recon_trace
+
+http://ferd.github.io/recon/recon_trace.html
+
+currently for function calls only
+
+```
+recon_trace:calls({cat_traveler, enter, '_'}, 5).
+
+23:20:54.652981 <0.346.0> cat_traveler:enter({cat,<<"Murka">>}, {town,<<"Praha">>})
+23:20:56.772668 <0.349.0> cat_traveler:enter({cat,<<"Vasjka">>}, {town,<<"Amsterdam">>})
+23:20:58.766497 <0.351.0> cat_traveler:enter({cat,<<"Marfa">>}, {town,<<"Minsk">>})
+23:20:59.538641 <0.352.0> cat_traveler:enter({cat,<<"Tihon">>}, {town,<<"Barcelona">>})
+23:21:03.601575 <0.355.0> cat_traveler:enter({cat,<<"Murka">>}, {town,<<"Praha">>})
+Recon tracer rate limit tripped.
+```
+
+Видим пид процесса и аргументы функции.
+
+```
+recon_trace:calls({cat_traveler, enter, fun(_) -> return_trace() end}, 4).
+23:23:08.437399 <0.469.0> cat_traveler:enter({cat,<<"Tihon">>}, {town,<<"Barcelona">>})
+23:23:08.437941 <0.469.0> cat_traveler:enter/2 --> ok
+23:23:08.931518 <0.470.0> cat_traveler:enter({cat,<<"Marfa">>}, {town,<<"Minsk">>})
+23:23:08.931922 <0.470.0> cat_traveler:enter/2 --> ok
+Recon tracer rate limit tripped.
+```
+Теперь мы видим возвращаемое значение (отдельным событием)
+
+Фильтрация по аргументам:
+```
+recon_trace:calls({cat_traveler, enter, fun([{cat, <<"Tihon">>}, _]) -> return_trace() end}, 4).
+```
+Аргументы функции приходится оборачивать в список.
+
+Стектрейс посмотреть нельзя, но можно увидеть, откуда идет вызов:
+```
+recon_trace:calls({cat_traveler, enter, fun(_) -> message(caller()) end}, 4).
+```
+И тут нужна своя форматирующая функция, т.к. recon сам не умеет форматировать такие сообщения.
+В документации к recon это не описано, но можно смотреть документацию erlang:trace_pattern/3
+http://erlang.org/doc/apps/erts/match_spec.html
+И там можно найти такие вещи: message, caller, return_trace, exception_trace, process_dump.
+Из всего этого recon умеет показывать только return_trace.
+
+Что касается стектрейса, то erlang:trace_pattern и match_spec не позволяют его получить.
+Но redbug получает. Если заглянуть в его исходники, то становится понятно, как.
+redbug для каждого события вызова функции бросает исключение, перехватывает его, берет стектрейс, и продолжает работу.
+
+Сравнение с redbug:
+- лимит задается либо на число событий, либо на число событий в единицу времени. Нет лимита просто по времени.
+  (во втором случае нужно вызывать recon_trace:clear(), чтобы остановить трейсинг)
+- умеет показывать только аргументы и возвращаемое значение.
+  Вообще-то можно добиться большего: caller, process_dump, но нужно делать свою форматирующую функцию.
+- ситаксис более громоздкий и документация сложнее
+
+recon больше заточен на интроспекцию, меньше на трейсинг.
+Для трейсинга лучше redbug.
+
+
+*** dbg
+
+http://www.erlang.org/doc/man/dbg.html
+тут нужен пример cat_enter -- полная сессия
+
+
+*** erlang:trace
+
+http://erlang.org/doc/man/erlang.html#trace-3
+http://erlang.org/doc/man/erlang.html#trace_pattern-3
+ну это может и не надо
+
+
+*** recon
+
+топ-процессов по CPU, памяти, длине очереди. Что еще?
+
+
+*** sys
+
+- события внутри ген-сервера sys:trace
+  главное, не захлебнуться этими событиями. Нужен нормальный способ остановиться
+
+- стейт потока, хранящего инфу о котах: cat_traveler_srv
+
+- модифицировать стейт, подсунуть кота в город, проследить, как возникают ошибки в АПИ
+  можно и закрашить процесс, если модифицировать стейт неправильно.
+
+(в не-эрланг системах, если состояние хранится в БД,
+то подобные манипуляции можно делать на БД.
+В эрланг системах это можно делать прямо в оперативной памяти ноды).
+
+
+*** Выводы
+
+recon -- это больше про интроспекцию
+redbug -- это про трассировку
+dbg использовать довольно сложно
