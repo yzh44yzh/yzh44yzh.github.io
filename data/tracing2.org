@@ -7,31 +7,27 @@
 
 ** TODO:
 - прочитать материалы, набросать черновик
-  + Stuff Goes Bad: Erlang in Anger. Fred Hebert. chapter 9 (есть записи на телефоне)
-  - http://yzh44yzh.github.io/post/trace_dbg.html
-  - Armstrong. chapter 21
-  - Cesarini. chapter 17
-  - Designing for Scalability with Erlang/OTP. chapter 5
-  - Erlang and OTP in Action. chapter 14
+  - Про эрланг vs XXX: интроспекция для отладки. Макс Лапшин.
+    https://levgem.livejournal.com/463349.html
+  - https://www.youtube.com/watch?v=4u6c2FNauYE
+  - https://www.youtube.com/watch?v=nLtFP7M9d88
+  - все материалы в закладках toread/erlang/tracing_and_monitoring
+    просто глянуть, что там вообще есть
   - доки
     - erlang:trace http://erlang.org/doc/man/erlang.html#trace-3
     - erlang:trace_pattern http://erlang.org/doc/man/erlang.html#trace_pattern-3
     - dbg http://www.erlang.org/doc/man/dbg.html
     - match spec http://erlang.org/doc/apps/erts/match_spec.html
-  - https://www.youtube.com/watch?v=4u6c2FNauYE&list=UUKrD_GYN3iDpG_uMmADPzJQ
-  - https://www.youtube.com/watch?v=nLtFP7M9d88&list=UUKrD_GYN3iDpG_uMmADPzJQ
-  - Про эрланг vs XXX: интроспекция для отладки. Макс Лапшин.
-    https://levgem.livejournal.com/463349.html
-  - все материалы в закладках toread/erlang/tracing_and_monitoring
-- презентация
 - практика
+- презентация
 - чистовик (не обязательно должен быть готов к 12-му)
 
-Этапы:
+** Этапы
 - выступление на митапе FuncBy 12-го
 - выступление на внутреннем митапе
 - запись скринкаста
 - пост в блог с теорией и практикой в скринкасте
+- мастер-класс. Тут надо проект посложнее. И в нем должны быть ошибки, которые можно найти трассировкой.
 
 
 ** Теория
@@ -96,20 +92,40 @@ recon_trace/redbug стейт создается одним вызовом
 - garbage_collection – сборка мусора
 
 Что можно увидеть для функций:
+- timestamp
 - аргументы
 - возвращаемое значение
 - пид процесса
-- caller (из какой функции был вызов)
-- process dump
+- caller (вызывающая функция)
+- process dump - Returns textual information on the process, formatted as a string and stored as a binary.
 - стэктрейс (только redbug)
-- ?
 
-что такое global и local scope
+global и local scope
+tracer process
 
 События трассировки можно направить в кастомную функцию, и потом как-то обрабатывать
 (сохранять в БД, передавать в elastic search, whatever)
 можно захадркодить в проекте включение/выключение трассировки с определенными настройками
 И потом в рантайме при каких-то условиях включать это (вручную или автоматически).
+
+Match specifications are compiled to a format close to the one used by the emulator, making them more efficient than functions.
+dbg:fun2ms/1 call. It converts specifications that are described using fun syntax into match specifications.
+literal fun
+-include_lib("stdlib/include/ms_transform.hrl").
+The specifications are tuples with three elements of the format [Head, Conditions, Body]
+Head -- аргументы функции
+Conditions -- гарды
+Body -- побочные эффекты (генерация событий, изменение флагов трассировки)
+
+Сложная штука, много нюансов.
+Хорошо описана тут:
+- Erlang Programming. Francesco Cesarini and Simon Thompson.
+  Chapter 17. Trace BIFs, the dbg Tracer, and Match Specifications.
+
+redbug и recon оба отказались от match specifications и придумали свои варианты описания функции, которые сами интерпретируют.
+И ими пользоваться гораздо удобнее.
+
+Оригинальный match specification вам понадобится, если вы захотите написать свой redbug.
 
 *** проект cat_traveler
 
@@ -139,7 +155,7 @@ https://github.com/massemanet/redbug
 ```
 redbug:start("cat_traveler:enter/2 -> return", [{time, 15000}, {msgs, 10}]).
 ```
-Приходит 2 сообщения на каждый вызов. В одном сообщении аргументы, в другом возвращаемое значение.
+Приходит 2 сообщения на каждый вызов функции:
 
 ```
 % 00:44:52 <0.1297.0>({cowboy_stream_h,request_process,3})
@@ -148,9 +164,16 @@ redbug:start("cat_traveler:enter/2 -> return", [{time, 15000}, {msgs, 10}]).
 % 00:44:52 <0.1297.0>(dead)
 % cat_traveler:enter/2 -> ok
 ```
-В первой строке инфа о процессе, в котором сработала функция. Его пид и функция, с которой он стартовал.
-Во второй строке вызываемая функция с аргументами.
+Первое сообщение генерируется в момент вызова функции.
+Оно содержит timestamp, инфу о процессе, в котором выполняется функция (pid и стартовая функция),
+название и аргументы функции.
 
+Второе сообщение генерируется при завершении функции.
+Оно содержит timestamp, инфу о процессе,
+название функции и возвращаемое значение.
+
+В нашем случае процесс уже завершился.
+После чего его pid по-прежнему известен, а стартовая функция уже не известна.
 
 ```
 redbug:start("cat_traveler:enter({cat,<<\"Tihon\">>}, _) -> return", [{time, 15000}, {msgs, 10}]).
@@ -177,6 +200,9 @@ redbug:start("cat_traveler:enter/2 -> stack,return", [{time, 15000}, {msgs, 10}]
 Note that not all functions in the call chain are on the stack,
 only functions we will return to (this is a consequence of tail call optimization.)
 
+TODO:
+- можно ли получить более точный timestamp?
+- попробовать трассировку всех функций в модуле cat_traveler, и вообще всех функций.
 
 *** recon_trace
 
@@ -205,7 +231,8 @@ recon_trace:calls({cat_traveler, enter, fun(_) -> return_trace() end}, 4).
 23:23:08.931922 <0.470.0> cat_traveler:enter/2 --> ok
 Recon tracer rate limit tripped.
 ```
-Теперь мы видим возвращаемое значение (отдельным событием)
+Теперь мы видим возвращаемое значение (отдельным событием).
+В отличие от redbug timestamp приходит с точностью до микросекунд. Так что мы можем посмотреть, сколько времени работала функция.
 
 Фильтрация по аргументам:
 ```
@@ -232,6 +259,8 @@ redbug для каждого события вызова функции брос
   (во втором случае нужно вызывать recon_trace:clear(), чтобы остановить трейсинг)
 - умеет показывать только аргументы и возвращаемое значение.
   Вообще-то можно добиться большего: caller, process_dump, но нужно делать свою форматирующую функцию.
+- нет трассировки событий процессов, только вызовы функций.
+- timestamp с точностью до микросекунд
 - ситаксис более громоздкий и документация сложнее
 
 recon больше заточен на интроспекцию, меньше на трейсинг.
@@ -241,8 +270,43 @@ recon больше заточен на интроспекцию, меньше н
 *** dbg
 
 http://www.erlang.org/doc/man/dbg.html
+
+
+посмотреть сообщения, которые приходят в srv.
+
 тут нужен пример cat_enter -- полная сессия
 
+dbg:tracer().
+dbg:tpl(tracer_test,fib,'_', dbg:fun2ms(fun(_) -> return_trace() end)).
+dbg:p(all,[c]).
+
+
+dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> message(caller()) end).
+
+TODO: process_dump тоже посмотреть. Желательно для какого-то процесса, где этот dump более-менее понятный.
+
+1> DbgFun = fun({trace, _Pid, _event, _data, Msg}, _Acc) -> 1> io:format("~s~n",[binary_to_list(Msg)])
+1> end.
+#Fun<erl_eval.12.113037538>
+2> dbg:tracer(process, {DbgFun, null}).
+{ok,<0.33.0>}
+3> dbg:tp({io,format,1}, [{'_',[],[{message,{process_dump}}]}]). {ok,[{matched,nonode@nohost,1},{saved,1}]}
+4> dbg:p(all,[c]).
+{ok,[{matched,nonode@nohost,25}]}
+5> io:format("Hello~n").
+Hello
+=proc:<0.30.0>
+State: Running
+Spawned as: erlang:apply/2
+Spawned by: <0.24.0>
+Started: Tue Oct 07 13:17:07 2008
+Message queue length: 0
+Number of heap fragments: 0
+Heap fragment data: 0
+Link list: []
+Reductions: 8879
+Stack+heap: 2584
+OldHeap: 2584
 
 *** erlang:trace
 
@@ -250,21 +314,64 @@ http://erlang.org/doc/man/erlang.html#trace-3
 http://erlang.org/doc/man/erlang.html#trace_pattern-3
 ну это может и не надо
 
+erlang:trace(Pid, true, [send, 'receive']).
+erlang:trace(Pid, false, [send, 'receive']).
 
 *** recon
 
 топ-процессов по CPU, памяти, длине очереди. Что еще?
 
+Рассказать, как был найдет hot spot в роутере
+riak core, vnodes
+300 ключей на vnode. Одна из них была горячая по CPU (по редукциям).
+я взял ее стейт, пересмотрел все 300 ключей, и нашел ключ, к которому обращались очень часто.
 
 *** sys
 
+http://www.erlang.org/doc/man/sys.html
+
 - события внутри ген-сервера sys:trace
-  главное, не захлебнуться этими событиями. Нужен нормальный способ остановиться
+  Можно просматривать все сообщения, которые проходят через gen_server
+
+sys:trace(cat_traveler_srv, true).
+sys:trace(cat_traveler_srv, false).
+
+Сообщения:
+- входящие call и cast
+- исходящие (ответы клиенту) и измененный стейт
+
+sys:log(cat_traveler_srv, true).
+sys:log(cat_traveler_srv, print).
+sys:log(cat_traveler_srv, false).
+Безопаснее, т.к. позволяет ограничить к-во сообщений.
+
+sys:log(cat_traveler_srv, get).
+можно как-то иначе обработать сообщения, чем просто направить их в консоль.
+TODO: как задается к-во сообщений?
+
+sys:log_to_file/2
+sys:install -- кастомная функция для обработки сообщений
+
+- Можно посмотреть статистику работы процесса:
+  время старта, к-во сообщений полученных и отправленных, инфа от планировщика.
+
+sys:statistics(cat_traveler_srv, true).
+sys:statistics(cat_traveler_srv, get).
+sys:statistics(cat_traveler_srv, false).
 
 - стейт потока, хранящего инфу о котах: cat_traveler_srv
 
+sys:get_status(cat_traveler_srv).
+{status, Pid, {module, Mod}, [ProcessDictionary, SysState, Parend, Dbg, Misc]}.
+SysState: running | suspended
+
+sys:get_state(cat_traveler_srv).
+
 - модифицировать стейт, подсунуть кота в город, проследить, как возникают ошибки в АПИ
   можно и закрашить процесс, если модифицировать стейт неправильно.
+
+sys:replace_state(cat_traveler_srv, Fun).
+
 
 (в не-эрланг системах, если состояние хранится в БД,
 то подобные манипуляции можно делать на БД.
@@ -276,3 +383,5 @@ http://erlang.org/doc/man/erlang.html#trace_pattern-3
 recon -- это больше про интроспекцию
 redbug -- это про трассировку
 dbg использовать довольно сложно
+
+Тема большая и сложная. Тут важно правильно начать -- с простых тулов.
