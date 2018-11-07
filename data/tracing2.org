@@ -6,23 +6,19 @@
 
 
 ** TODO:
-- прочитать материалы, набросать черновик
-  - Про эрланг vs XXX: интроспекция для отладки. Макс Лапшин.
-    https://levgem.livejournal.com/463349.html
-  - https://www.youtube.com/watch?v=4u6c2FNauYE
-  - https://www.youtube.com/watch?v=nLtFP7M9d88
-  - все материалы в закладках toread/erlang/tracing_and_monitoring
-    просто глянуть, что там вообще есть
-  - доки
-    - erlang:trace http://erlang.org/doc/man/erlang.html#trace-3
-    - erlang:trace_pattern http://erlang.org/doc/man/erlang.html#trace_pattern-3
-    - dbg http://www.erlang.org/doc/man/dbg.html
-    - match spec http://erlang.org/doc/apps/erts/match_spec.html
+
 - практика
+  остались recon и sys
+
+- черновик
+
 - презентация
+
 - чистовик (не обязательно должен быть готов к 12-му)
 
+
 ** Этапы
+
 - выступление на митапе FuncBy 12-го
 - выступление на внутреннем митапе
 - запись скринкаста
@@ -34,7 +30,7 @@
 
 *** Трейсинг
 
-Традиционно у разработчика есть 2 средства для изучения системы на проде -- это логи и метрики.
+Традиционно у разработчика есть 2 средства для получения обратной связи от системы на проде -- это логи и метрики.
 Логи либо на целевой машине, либо куда-то собираются с нескольких машин.
 Метрики где-нибудь в графане, с одной или с нескольких машин.
 
@@ -45,6 +41,7 @@ TODO: картинки:
 Это мощные инструменты, и с ними многое можно сделать.
 
 Но у эрланга есть больше возможностей. Мы можем подключиться консолью к ноде на удаленной машине.
+
 Что можно сделать?
 - изучать текущее состояние системы -- интроспекция
 - наблюдать изменение системы в динамике -- трассировка
@@ -74,10 +71,10 @@ Functions can be specified in two parts:
 What defines whether a specific function call gets traced or not is the intersection of both
 и тут картинка с двумя пересекающимися кругами
 
-trace_patter/dbg создают стейт трассировки, и модифицируют его на протяжении сессии
+trace_patter/dbg создают стейт трассировки (какие флаги трассировки включены или выключены),
+и модифицируют его на протяжении сессии
 этот стейт явно посмотреть нельзя, приходится помнить, с какими опциями делались вызовы
 You specify sets of matching pids and sets of trace patterns independently
-и потом трассировку нужно правильно остановить
 
 recon_trace/redbug стейт создается одним вызовом
 следущий вызов очищает предыдущий стейт и создает новый
@@ -145,8 +142,15 @@ api, устройство
 
 *** Observer
 
+http://erlang.org/doc/apps/observer/observer_ug.html
+
 и для system.marfa (там стейт интереснее), и для load.agent (там процессов больше)
 
+Запустить, пройти по всем вкладкам, объяснить, что там.
+Пройтись по всем приложениям, показать дерево супервизоров. И как посмотреть стейт процесса.
+
+У него есть UI для трассировки. Неплохой. Но я так и не смог увидеть никаких событий. Почему-то не показываются.
+При том, что такая же трассировка из консоли работает.
 
 *** Redbug
 
@@ -175,10 +179,19 @@ redbug:start("cat_traveler:enter/2 -> return", [{time, 15000}, {msgs, 10}]).
 В нашем случае процесс уже завершился.
 После чего его pid по-прежнему известен, а стартовая функция уже не известна.
 
+Можно получить более точный timestamp
+```
+redbug:start("cat_traveler:enter/2 -> return", [{time, 15000}, {msgs, 10}, {print_msec, true}]).
+```
+Теперь timestamp в миллисекундах. Что все равно недостаточно, чтобы оценить время выполнения функции, например.
+
+
+Отфильтруем только те вызовы, которые касаются кота Тихона:
 ```
 redbug:start("cat_traveler:enter({cat,<<\"Tihon\">>}, _) -> return", [{time, 15000}, {msgs, 10}]).
 ```
 
+Кроме возвращаемого значения можно посмотреть стек вызовов.
 ```
 redbug:start("cat_traveler:enter/2 -> stack,return", [{time, 15000}, {msgs, 10}]).
 ```
@@ -200,15 +213,16 @@ redbug:start("cat_traveler:enter/2 -> stack,return", [{time, 15000}, {msgs, 10}]
 Note that not all functions in the call chain are on the stack,
 only functions we will return to (this is a consequence of tail call optimization.)
 
-TODO:
-- можно ли получить более точный timestamp?
-- попробовать трассировку всех функций в модуле cat_traveler, и вообще всех функций.
+
+Ну и посмотрим все вызовы функций в модуле cat_traveler:
+```
+redbug:start("cat_traveler -> return", [{time, 15000}, {msgs, 10}]).
+```
+
 
 *** recon_trace
 
 http://ferd.github.io/recon/recon_trace.html
-
-currently for function calls only
 
 ```
 recon_trace:calls({cat_traveler, enter, '_'}, 5).
@@ -238,17 +252,21 @@ Recon tracer rate limit tripped.
 ```
 recon_trace:calls({cat_traveler, enter, fun([{cat, <<"Tihon">>}, _]) -> return_trace() end}, 4).
 ```
-Аргументы функции приходится оборачивать в список.
+Обратите внимание, что аргументы функции нужно оборачивать в список.
 
-Стектрейс посмотреть нельзя, но можно увидеть, откуда идет вызов:
+Стектрейс посмотреть нельзя, но можно увидеть caller -- вызывающую функцию.
+Match Specifiation http://erlang.org/doc/apps/erts/match_spec.html
+позволяет добавлять в событие дополнительную информацию с помощью команды message.
+Из интересного, там может быть caller или process_dump.
 ```
 recon_trace:calls({cat_traveler, enter, fun(_) -> message(caller()) end}, 4).
+21:36:24.193053 <0.4492.0> unknown trace type call -- [{cat_traveler,enter,
+                                                        [{cat,<<"Marfa">>},
+                                                         {town,<<"Minsk">>}]},
+                                                       {ct_handler_api,
+                                                        handle,3}]
 ```
-И тут нужна своя форматирующая функция, т.к. recon сам не умеет форматировать такие сообщения.
-В документации к recon это не описано, но можно смотреть документацию erlang:trace_pattern/3
-http://erlang.org/doc/apps/erts/match_spec.html
-И там можно найти такие вещи: message, caller, return_trace, exception_trace, process_dump.
-Из всего этого recon умеет показывать только return_trace.
+Правда, recon_trace не понимает сообщения такого вида, но все равно показывает их.
 
 Что касается стектрейса, то erlang:trace_pattern и match_spec не позволяют его получить.
 Но redbug получает. Если заглянуть в его исходники, то становится понятно, как.
@@ -257,71 +275,222 @@ redbug для каждого события вызова функции брос
 Сравнение с redbug:
 - лимит задается либо на число событий, либо на число событий в единицу времени. Нет лимита просто по времени.
   (во втором случае нужно вызывать recon_trace:clear(), чтобы остановить трейсинг)
-- умеет показывать только аргументы и возвращаемое значение.
-  Вообще-то можно добиться большего: caller, process_dump, но нужно делать свою форматирующую функцию.
+- Показывает, хотя и криво, message(caller) и message(process_dump)
 - нет трассировки событий процессов, только вызовы функций.
-- timestamp с точностью до микросекунд
+- timestamp с точностью до микросекунд, тогда как у redbug до миллисекунд.
 - ситаксис более громоздкий и документация сложнее
-
-recon больше заточен на интроспекцию, меньше на трейсинг.
-Для трейсинга лучше redbug.
-
 
 *** dbg
 
 http://www.erlang.org/doc/man/dbg.html
 
-
-посмотреть сообщения, которые приходят в srv.
-
-тут нужен пример cat_enter -- полная сессия
-
+Запустим трассировку в самом простом виде:
+```
 dbg:tracer().
-dbg:tpl(tracer_test,fib,'_', dbg:fun2ms(fun(_) -> return_trace() end)).
-dbg:p(all,[c]).
+MS1 = dbg:fun2ms(fun(_) -> return_trace() end).
+dbg:tp(cat_traveler, enter, MS1).
+dbg:p(all, [c]).
+(<0.2127.0>) call cat_traveler:enter({cat,<<"Marfa">>},{town,<<"Minsk">>})
+(<0.2127.0>) returned from cat_traveler:enter/2 -> ok
+(<0.2129.0>) call cat_traveler:enter({cat,<<"Vasjka">>},{town,<<"Barcelona">>})
+(<0.2129.0>) returned from cat_traveler:enter/2 -> ok
+(<0.2130.0>) call cat_traveler:enter({cat,<<"Murka">>},{town,<<"Minsk">>})
+(<0.2130.0>) returned from cat_traveler:enter/2 -> ok
+(<0.2133.0>) call cat_traveler:enter({cat,<<"Tihon">>},{town,<<"Barcelona">>})
+(<0.2133.0>) returned from cat_traveler:enter/2 -> ok
+(<0.2135.0>) call cat_traveler:enter({cat,<<"Murka">>},{town,<<"Stockholm">>})
+(<0.2135.0>) returned from cat_traveler:enter/2 -> ok
+dbg:stop_clear().
+```
+Видим по 2 события на каждый вызов функции.
+В первом событии pid и аргументы функции.
+Во втором событии pid и возвращаемое значение.
+
+Добавим timestamp
+```
+dbg:tracer().
+MS2 = dbg:fun2ms(fun(_) -> enable_trace(timestamp), return_trace() end).
+dbg:tp(cat_traveler, enter, MS2).
+dbg:p(all, [c]).
+(<0.2589.0>) call cat_traveler:enter({cat,<<"Murka">>},{town,<<"Praha">>}) (Timestamp: {1541,
+                                                                                        613751,
+                                                                                        772026})
+(<0.2589.0>) returned from cat_traveler:enter/2 -> ok (Timestamp: {1541,
+                                                                   613751,
+                                                                   772126})
+dbg:stop_clear().
+```
+
+Хех, это не удобный способ представления времени. Нужна еще кастомная функция форматирования, чтобы сделать удобнее.
+
+```
+DbgFun = fun(Event, _Acc) ->
+  case Event of
+    {trace_ts, Pid, call, FunAndArgs, TS} ->
+      DT = calendar:now_to_datetime(TS),
+      io:format("~p, ~p, Function call ~p~n", [DT, Pid, FunAndArgs]);
+    {trace_ts, Pid, return_from, MFA, Result, TS} ->
+      DT = calendar:now_to_datetime(TS),
+      io:format("~p, ~p, Function ~p returns ~p~n", [DT, Pid, MFA, Result])
+  end
+end.
+dbg:tracer(process, {DbgFun, null}).
+dbg:tp(cat_traveler, enter, MS2).
+dbg:p(all, [c]).
+{{2018,11,7},{18,32,21}}, <0.4267.0>, Function call {cat_traveler,enter,
+                                                     [{cat,<<"Marfa">>},
+                                                      {town,<<"Munchen">>}]}
+{{2018,11,7},{18,32,21}}, <0.4267.0>, Function {cat_traveler,enter,2} returns ok
+dbg:stop_clear().
+```
+Такую функцию в консоли не наберешь. Ее нужно готовить и отлаживать -- отдельная морока.
 
 
-dbg:fun2ms(fun([_,{_,{error, unknown_msg}}]) -> message(caller()) end).
 
-TODO: process_dump тоже посмотреть. Желательно для какого-то процесса, где этот dump более-менее понятный.
+Добавим фильтрацию по аргументам:
+```
+MS3 = dbg:fun2ms(fun([{cat, <<"Tihon">>}, _]) -> return_trace() end).
+dbg:tracer().
+dbg:tp(cat_traveler, enter, MS3).
+dbg:p(all, [c]).
+(<0.5295.0>) call cat_traveler:enter({cat,<<"Tihon">>},{town,<<"Minsk">>})
+(<0.5295.0>) returned from cat_traveler:enter/2 -> ok
+(<0.5301.0>) call cat_traveler:enter({cat,<<"Tihon">>},{town,<<"Barcelona">>})
+(<0.5301.0>) returned from cat_traveler:enter/2 -> ok
+dbg:stop_clear().
+```
 
-1> DbgFun = fun({trace, _Pid, _event, _data, Msg}, _Acc) -> 1> io:format("~s~n",[binary_to_list(Msg)])
-1> end.
-#Fun<erl_eval.12.113037538>
-2> dbg:tracer(process, {DbgFun, null}).
-{ok,<0.33.0>}
-3> dbg:tp({io,format,1}, [{'_',[],[{message,{process_dump}}]}]). {ok,[{matched,nonode@nohost,1},{saved,1}]}
-4> dbg:p(all,[c]).
-{ok,[{matched,nonode@nohost,25}]}
-5> io:format("Hello~n").
-Hello
-=proc:<0.30.0>
+Давайте посмотрим caller()
+```
+MS4 = dbg:fun2ms(fun(_) -> message(caller()), return_trace() end).
+dbg:tracer().
+dbg:tp(cat_traveler, enter, MS4).
+dbg:p(all, [c]).
+(<0.5391.0>) call cat_traveler:enter({cat,<<"Marfa">>},{town,<<"Munchen">>}) ({ct_handler_api,
+                                                                               handle,
+                                                                               3})
+dbg:stop_clear().
+```
+
+И давайте посмотрим process_dump
+```
+MS5 = dbg:fun2ms(fun(_) -> message(process_dump()), return_trace() end).
+dbg:tracer().
+dbg:tp(cat_traveler, enter, MS5).
+dbg:p(all, [c]).
+(<0.5444.0>) call cat_traveler:enter({cat,<<"Tihon">>},{town,<<"Minsk">>}) (<<"=proc:<0.5444.0>
+...
+dbg:stop_clear().
+```
+
+Дамп большой, и не очень читабельный. Тут нужна форматирующая функция.
+
+```
+DbgFun2 = fun(Event, _Acc) ->
+  case Event of
+    {trace, Pid, call, FunAndArgs, Info} ->
+      io:format("~p, Function call ~p~n", [Pid, FunAndArgs]),
+      Lines = binary:split(Info, <<"\n">>, [global]),
+      lists:foreach(fun(Line) -> io:format("~s~n", [Line]) end, Lines);
+    {trace, Pid, return_from, MFA, Result} ->
+      io:format("~p, Function ~p returns ~p~n", [Pid, MFA, Result])
+  end
+end.
+dbg:tracer(process, {DbgFun2, null}).
+dbg:tp(cat_traveler, enter, MS5).
+dbg:p(all, [c]).
+<0.6769.0>, Function call {cat_traveler,enter,
+                              [{cat,<<"Marfa">>},{town,<<"Minsk">>}]}
+=proc:<0.6769.0>
 State: Running
-Spawned as: erlang:apply/2
-Spawned by: <0.24.0>
-Started: Tue Oct 07 13:17:07 2008
-Message queue length: 0
-Number of heap fragments: 0
-Heap fragment data: 0
-Link list: []
-Reductions: 8879
-Stack+heap: 2584
-OldHeap: 2584
+Spawned as: proc_lib:init_p/5
+...
+dbg:stop_clear().
+```
+Вызывающий процесс -- это http хендлер. И дамп его стейта соответствующий.
+
+Ну и раз у нас полноценный dbg, а не ограниченый redbug, то можно смотреть не только вызовы функций,
+а и события, связаные с процессами. Например, все входящие и исходящие сообщения.
+
+```
+dbg:tracer().
+dbg:p(cat_traveler_srv, [send, 'receive']).
+(<0.214.0>) << {'$gen_call',{<0.6856.0>,#Ref<0.293362199.3499622401.187526>},
+                            {leave,{cat,<<"Tihon">>},{town,<<"Barcelona">>}}}
+(<0.214.0>) <0.6856.0> ! {#Ref<0.293362199.3499622401.187526>,ok}
+(<0.214.0>) << {'$gen_call',{<0.6857.0>,#Ref<0.293362199.3499622401.187535>},
+                            {leave,{cat,<<"Marfa">>},{town,<<"Minsk">>}}}
+(<0.214.0>) <0.6857.0> ! {#Ref<0.293362199.3499622401.187535>,ok}
+dbg:stop_clear().
+```
+
+Сравнение с redbug:
+- доступны все возможности трассировки
+- лимит на число сообщений и на время создать нельзя, нужно явно останавливать трассировку
+- защиты от большого количества событий нет
+- нужно изучить Match Specification и dbg
+- бывает нужна форматирующая функция
 
 *** erlang:trace
 
 http://erlang.org/doc/man/erlang.html#trace-3
 http://erlang.org/doc/man/erlang.html#trace_pattern-3
-ну это может и не надо
 
+Вызовы функций cat_traveler с фильтрацией по аргументам:
+```
+MS3 = dbg:fun2ms(fun([{cat, <<"Tihon">>}, _]) -> return_trace() end).
+erlang:trace(all, true, [call]).
+erlang:trace_pattern({cat_traveler, '_', '_'}, MS3, []).
+% wait some time
+flush().
+Shell got {trace,<0.480.0>,call,
+                 {cat_traveler,leave,[{cat,<<"Tihon">>},{town,<<"Minsk">>}]}}
+Shell got {trace,<0.480.0>,return_from,{cat_traveler,leave,2},ok}
+Shell got {trace,<0.484.0>,call,
+                 {cat_traveler,enter,
+                               [{cat,<<"Tihon">>},{town,<<"Barcelona">>}]}}
+Shell got {trace,<0.484.0>,return_from,{cat_traveler,enter,2},ok}
+
+erlang:trace(all, false, [call]).
+```
+
+Вызовы функций cat_traveler с добавлением caller():
+```
+MS4 = dbg:fun2ms(fun(_) -> message(caller()), return_trace() end).
+erlang:trace(all, true, [call]).
+erlang:trace_pattern({cat_traveler, '_', '_'}, MS4, []).
+
+flush().
+Shell got {trace,<0.649.0>,call,
+                 {cat_traveler,enter,[{cat,<<"Marfa">>},{town,<<"Minsk">>}]},
+                 {ct_handler_api,handle,3}}
+Shell got {trace,<0.649.0>,return_from,{cat_traveler,enter,2},ok}
+
+erlang:trace(all, false, [call]).
+```
+
+Все входящие и исходящие сообщения cat_traveler_srv
+```
+Pid = whereis(cat_traveler_srv).
 erlang:trace(Pid, true, [send, 'receive']).
+
+flush().
+Shell got {trace,<0.214.0>,'receive',
+                 {'$gen_call',{<0.855.0>,#Ref<0.2245986846.305135617.225212>},
+                              {enter,{cat,<<"Vasjka">>},
+                                     {town,<<"Barcelona">>}}}}
+Shell got {trace,<0.214.0>,send,
+                 {#Ref<0.2245986846.305135617.225212>,ok},
+                 <0.855.0>}
+
 erlang:trace(Pid, false, [send, 'receive']).
+```
 
 *** recon
 
-топ-процессов по CPU, памяти, длине очереди. Что еще?
+TODO топ-процессов по CPU, памяти, длине очереди. Что еще? см erl_attach_explore_trace.org
 
-Рассказать, как был найдет hot spot в роутере
+TODO: Рассказать, как был найдет hot spot в роутере
 riak core, vnodes
 300 ключей на vnode. Одна из них была горячая по CPU (по редукциям).
 я взял ее стейт, пересмотрел все 300 ключей, и нашел ключ, к которому обращались очень часто.
