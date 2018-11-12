@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Интроспекция и трассировка эрланг-сервиса на примере реального проекта</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+        font-family: 'Georgia';
+        }
+        h1, h2, h3 {
+        font-family: 'Ubuntu';
+        font-weight: normal;
+        }
+        .remark-code, .remark-inline-code { font-family: 'Monaco'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Интроспекция и трассировка эрланг-сервиса
+### на примере реального проекта
+
+---
+
+class: center, top
+
+## Система
+
+Развернутый и работающий проект
+
+--
+
+Чтобы контролировать систему, нужно получать от нее обратную связь
+
+--
+
+Обычно это логи и метрики
+
+--
+
+**В эрланг проектах это еще:**
+
+--
+
+Интроспекция
+
+--
+
+Трассировка
+
+---
+
+class: center, top
+
+## Интроспекция
+
+Изучение текущего состояния системы
+
+--
+
+## Трассировка
+
+Отслеживание изменения системы в динамике
+
+--
+
+## Модификация
+
+Еще можно активно модифицировать систему
+
+На проде не рекомендуется, но если очень-очень надо, то дерзайте
+
+---
+
+class: center, top
+
+## Трассировка
+
+Тема этого доклада
+
+Интроспекцию и модификацию тоже немного затронем
+
+---
+
+class: center, top
+
+## Трассировка
+
+EVM имеет встроеную систему событий
+
+--
+
+обо всем, происходящем в системе
+
+--
+
+Проблема в том, чтобы выбрать только те, что нужны
+
+---
+
+class: center, top
+
+## Трассировка
+
+Слишком большое количество событий
+
+--
+
+Перегрузит IO
+
+--
+
+Переполнит память
+
+--
+
+Сделает невозможным ввод с консоли
+
+---
+
+class: center, top
+
+## Трассировка
+
+Выбираем, какие процессы мы хотим видеть
+http://erlang.org/doc/man/erlang.html#trace-3
+
+--
+
+Выбираем, какие вызовы функций мы хотим видеть
+http://erlang.org/doc/man/erlang.html#trace_pattern-3
+
+--
+
+На пересечении процессов и функций генерируются события
+
+---
+
+class: center, top
+
+## Трассировка
+
+Выбираем процессы:
+
+pid
+
+all
+
+new
+
+existing
+
+---
+
+class: center, top
+
+## Трассировка
+
+Выбираем функции:
+
+{Module, Function, Arity}
+
+[Match Specification](http://erlang.org/doc/apps/erts/match_spec.html)
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Какую информацию о процессах можно получить?**
+
+--
+
+отправка/получение сообщений
+
+--
+
+жизненный цикл:
+spawn, exit, register, unregister
+
+--
+
+связи между процессами:
+link, unlink, getting_linked, getting_unlinked
+
+--
+
+работа планировщика
+
+--
+
+работа сборка мусора
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Какую информацию о вызовах функций можно получить?**
+
+--
+
+timestamp
+
+--
+
+аргументы
+
+--
+
+возвращаемое значение
+
+--
+
+pid процесса
+
+--
+
+caller (вызывающая функция)
+
+--
+
+process dump
+
+--
+
+стэктрейс (только redbug)
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Флаги трассировки**
+
+--
+
+send, 'receive' -- отправка/получение сообщений
+
+--
+
+procs -- жизненный цикл процессов
+
+--
+
+running -- работа планировщика
+
+--
+
+garbage_collection -- работа сборка мусора
+
+--
+
+call -- вызовы функций
+
+--
+
+global и local scope
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Флаги трассировки**
+
+Можно устанавливать и снимать
+
+Формируют стейт трассировки
+
+---
+
+class: center, top
+
+## Трассировка
+
+**tracer process**
+
+Принимает события
+
+--
+
+**tracer function**
+
+Обрабатывает события
+
+--
+
+Выводит на консоль
+
+--
+
+Сохраняет в файл
+
+--
+
+Сохраняет в БД
+
+--
+
+Отправляет в другой сервис
+
+--
+
+Что угодно
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Match specification**
+
+Важная штука, с которой нужно разобраться
+
+http://erlang.org/doc/apps/erts/match_spec.html
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Match specification определяет**
+
+при каких условиях вызов функции будет генерировать событие
+
+--
+
+и какую информацию должно нести событие
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Match specification**
+
+```erlang
+[{Head, Conditions, Body}]
+```
+
+--
+
+Head -- аргументы функции
+
+--
+
+Conditions -- охранные выражения
+
+--
+
+Body -- побочные эффекты (генерация событий, изменение флагов трассировки)
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Match specification**
+
+.left[
+```erlang
+> dbg:fun2ms(fun([{cat, <<"Tihon">>}, _]) -> return_trace() end).
+[{
+    [{cat,<<"Tihon">>},'_'],
+    [],
+    [{return_trace}]
+}]
+```
+]
+
+---
+
+class: center, top
+
+## Трассировка
+
+**Erlang Programming**
+
+Francesco Cesarini and Simon Thompson
+
+Chapter 17
+
+Trace BIFs, the dbg Tracer, and Match Specifications
+
+---
+
+class: center, top
+
+## Трассировка
+
+redbug и recon
+
+отказались от использования match specifications
+
+и придумали свои варианты
+
+---
+
+class: center, top
+
+## Трассировка
+
+match specification понадобится
+
+если вы будете пользоваться dbg
+
+или захотите написать свой redbug :)
+
+---
+
+class: center, top
+
+## Проект cat_traveler
+
+https://github.com/yzh44yzh/cat_traveler
+
+---
+
+class: center, top
+
+## Проект cat_traveler
+
+Бизнес-требования
+
+АПИ
+
+---
+
+class: center, top
+
+## Практика
+
+Observer
+
+--
+
+redbug
+
+--
+
+recon_trace
+
+--
+
+dbg
+
+--
+
+trace и trace_pattern
+
+--
+
+recon
+
+--
+
+sys
+
+---
+
+class: center, middle
+
+## Вопросы
+
+    </textarea>
+    <script src="./remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
