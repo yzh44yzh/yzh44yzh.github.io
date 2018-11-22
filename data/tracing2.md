@@ -326,10 +326,10 @@ end.
 dbg:tracer(process, {DbgFun, null}).
 dbg:tp(cat_traveler, enter, MS2).
 dbg:p(all, [c]).
-{{2018,11,7},{18,32,21}}, <0.4267.0>, Function call {cat_traveler,enter,
+{ {2018,11,7},{18,32,21} }, <0.4267.0>, Function call {cat_traveler,enter,
                                                      [{cat,<<"Marfa">>},
                                                       {town,<<"Munchen">>}]}
-{{2018,11,7},{18,32,21}}, <0.4267.0>, Function {cat_traveler,enter,2} returns ok
+{ {2018,11,7},{18,32,21} }, <0.4267.0>, Function {cat_traveler,enter,2} returns ok
 dbg:stop_clear().
 ```
 Такую функцию в консоли не наберешь. Ее нужно готовить и отлаживать -- отдельная морока.
@@ -555,7 +555,7 @@ sys:get_state(cat_traveler_srv).
 
 ```
 F = fun({state, Cats, Towns}) ->
-Cats2 = Cats#{{cat, <<"Tihon">>} => {town, <<"Minsk">>}},
+Cats2 = Cats#{ {cat, <<"Tihon">>} => {town, <<"Minsk">>} },
 {state, Cats2, Towns}
 end.
 sys:replace_state(cat_traveler_srv, F).
