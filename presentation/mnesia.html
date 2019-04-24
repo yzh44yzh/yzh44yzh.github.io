@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Mnesia</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+        font-family: 'Georgia';
+        }
+        h1, h2, h3 {
+        font-family: 'Ubuntu';
+        font-weight: normal;
+        }
+        .red { color: #f00; }
+        .remark-code, .remark-inline-code { font-family: 'Monaco'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Mnesia
+### Распределенное хранилище
+### в эрланговском кластере
+
+---
+
+class: center, top
+
+## Amnesia
+
+1999 год.
+
+Изначально база данных называлась Amnesia.
+
+Это название не понравилось кому-то из менеджмента.
+
+"So we dropped the A, and the name stuck." Joe Armstrong.
+
+---
+
+class: center, top
+
+## Фичи
+
+### Работает внутри эрланговской ноды
+
+--
+
+Не нужно передавать данные по сети
+
+--
+
+### Хранит данные нативно (Erlang term)
+
+--
+
+Не нужно сериализовать/десериализовать данные
+
+--
+
+### Хранит данные в ETS/DEST таблицах
+
+--
+
+Чтение и запись работают очень быстро
+
+---
+
+class: center, top
+
+## Фичи
+
+### Работает внутри эрланговского кластера
+
+--
+
+Данные доступны отовсюду в кластере (сетевая прозрачность)
+
+--
+
+Полная реплика данных на каждой ноде
+
+---
+
+class: center, top
+
+## Фичи
+
+Транзакции (ACID)
+
+--
+
+Вторичные индексы
+
+--
+
+Миграции (структуры таблиц и данных)
+
+--
+
+Шардинг (fragmented tables)
+
+---
+
+class: center, top
+
+## С точки зрения CAP теоремы
+
+Тут есть нюансы
+
+--
+
+### Если с транзакциями, то CP
+
+--
+
+И это медленно (очень)
+
+--
+
+### Если в dirty режиме, то AP
+
+--
+
+И тут никаких гарантий Consistency, даже "eventualy"
+
+--
+
+### А если я хочу CA?
+
+--
+
+Тогда просто бери ETS/DETS
+
+---
+
+class: center, top
+
+## API
+
+### Базовые KV операции
+
+read, write, delete
+
+--
+
+### ETS/DETS API
+
+lookup, match, select
+
+--
+
+### Fold
+
+foldl, foldr
+
+--
+
+### QLC
+
+Query List Comprehension
+
+---
+
+class: center, top
+
+## QLC
+
+.left[
+```erlang
+qlc:q([X || X <- mnesia:table(shop)])
+
+qlc:q([
+    X#shop.item || X <- mnesia:table(shop),
+    X#shop.quantity < 250
+])
+
+qlc:q([
+    X#shop.item ||
+    X <- mnesia:table(shop),
+    X#shop.quantity < 250,
+    Y <- mnesia:table(cost),
+    X#shop.item =:= Y#cost.name,
+    Y#cost.price < 2
+])
+```
+]
+
+---
+
+class: center, top
+
+## Транзакции
+
+Синхронные и "обыкновенные"
+
+--
+
+Pessimistic locking
+
+--
+
+Медленные
+
+--
+
+Но без них нет консистентности данных
+
+---
+
+class: center, top
+
+## Транзакции
+
+Медленные транзакции -- это еще пол беды
+
+---
+
+class: center, top
+
+## Репутация Mnesia
+
+Мнение широко известных в узких кругах авторитетов
+
+--
+
+Печальный опыт с персистентными очередями в RabbitMQ
+
+--
+
+Слухи из Стокгольма от местных разработчиков
+
+---
+
+class: center, top
+
+## Репутация Mnesia
+
+Суть проблемы в том, что если нода не была корректно остановлена, а упала,
+
+--
+
+(Да, такое случается. Хоть у нас и Fault Tolerance, но против OOM нет приёма.)
+
+--
+
+то восстановление большой таблицы с диска может занять часы.
+
+---
+
+class: center, top
+
+## Репутация Mnesia
+
+.red.bold[Downtime сервиса может длится несколько часов!]
+
+--
+
+На этом про Mnesia можно было бы забыть и не вспоминать
+
+--
+
+(я так и делал несколько лет)
+
+--
+
+### но ...
+
+---
+
+class: center, top
+
+## Польза Mnesia
+
+её можно применить с пользой
+
+---
+
+class: center, top
+
+xx
+
+---
+
+class: center, top
+
+xx
+
+---
+
+class: center, top
+
+xx
+
+---
+
+class: center, middle
+
+## Вопросы
+
+    </textarea>
+    <script src="../js/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
