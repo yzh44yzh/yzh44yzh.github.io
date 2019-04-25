@@ -165,38 +165,6 @@ WhatsUp потом сделали ForgETS.
 А почему, собственно, не использовать Mnesia в ситуациях, когда персистентность не нужна?
 
 
-* Преимущества. Где Mnesia подходит.
-
-- в памяти ноды, не нужно передавать данные по сети
-- в нативных данных, не нужна сериализация
-run in the same address space as the application
-хранит эрланг-объекты, запросы пишутся на эрланг,
-нет накладных расходов на сериализацию/десериализацию и передачу данных по tcp
-
-It is the perfect choice for caching all of the user session data.
-Once users have logged on, it can be read from a persistent storage medium and duplicated across a cluster of computers for redundancy reasons.
-
-APIs, all running in the same memory space and controlled uniformly by an Erlang system.
-
-If one node crashes, the system will still work, but the number of replicas will be reduced. When the crashed node comes back online, it will resynchronize with the other nodes where the replicas are kept.
-
-Мнезия нужна, если:
-- распределенный in memory кэш
-  (если не нужна распределенность, то хватит ets)
-- относительно мало данных, и заранее понятно, сколько их будет
-- простые запросы без транзакций
-
-
-* Недостатки. Где Mnesia не подходит.
-
-You do not want to use Mnesia if your system requires the following:
-• Simple key-value lookup
-• A storage medium for large binaries such as pictures or audio files
-• A persistent log
-• A database that has to store gigabytes of data
-• A large data archive that will never stop growing
-
-
 * Наш сценарий использования
 
 Старый вариант -- хранение сессий в MySQL.
@@ -295,6 +263,38 @@ init_sessions_storage() ->
 
 На перф тесте у нас синхронизация занимала около секунды, но это синтетические данные.
 Но это не одна таблица.
+
+
+* Преимущества. Где Mnesia подходит.
+
+- в памяти ноды, не нужно передавать данные по сети
+- в нативных данных, не нужна сериализация
+run in the same address space as the application
+хранит эрланг-объекты, запросы пишутся на эрланг,
+нет накладных расходов на сериализацию/десериализацию и передачу данных по tcp
+
+It is the perfect choice for caching all of the user session data.
+Once users have logged on, it can be read from a persistent storage medium and duplicated across a cluster of computers for redundancy reasons.
+
+APIs, all running in the same memory space and controlled uniformly by an Erlang system.
+
+If one node crashes, the system will still work, but the number of replicas will be reduced. When the crashed node comes back online, it will resynchronize with the other nodes where the replicas are kept.
+
+Мнезия нужна, если:
+- распределенный in memory кэш
+  (если не нужна распределенность, то хватит ets)
+- относительно мало данных, и заранее понятно, сколько их будет
+- простые запросы без транзакций
+
+
+* Недостатки. Где Mnesia не подходит.
+
+You do not want to use Mnesia if your system requires the following:
+• Simple key-value lookup
+• A storage medium for large binaries such as pictures or audio files
+• A persistent log
+• A database that has to store gigabytes of data
+• A large data archive that will never stop growing
 
 
 * Что вообще просходит с эрланговскими БД?
