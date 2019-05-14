@@ -1,42 +1,230 @@
 \documentclass{beamer}
-% \usepackage{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+
+% https://hartwork.org/beamer-theme-matrix/
+\usetheme{Copenhagen}
+\usecolortheme{dove}
 \beamertemplatenavigationsymbolsempty
 
-\title[Mnesia]{Mnesia}
-\author{Yuri Zhloba}
+
+\title{Использование базы данных Mnesia в чат-сервере}
+\author{Юра Жлоба}
 \institute{Wargaming.net}
 \date{May 2019}
 
 \begin{document}
 \maketitle
 
+\section{Интро}
+
 \begin{frame}
-  \frametitle{Hello}
+  \frametitle{Mnesia}
+  \framesubtitle{Распределенная key value база данных, встраиваемая в Erlang приложения.}
+  Разберемся, почему ее не рекомендуют использовать и почему все же используют.
+  И узнаем, как она используется в чат-сервере.
+\end{frame}
+
+\begin{frame}
+  \frametitle{Amnesia}
+1999 год
+Изначально база данных называлась Amnesia
+Это название не понравилось кому-то из менеджмента
+"So we dropped the A, and the name stuck." Joe Armstrong.
+\end{frame}
+
+\begin{frame}
+ Amnesia
+Традицию продолжила компания WhatsApp
+Они назвали свою БД
+ForgETS
+\end{frame}
+
+\section{Фичи}
+
+\begin{frame}
+    \frametitle{Фичи}
   \begin{itemize}[<+->]
-    \item Bla-bla-bla
-    \item Boo-boo-boo
-    \item Booom!
+    \item Работает внутри эрланговской ноды
+    \item (Не нужно передавать данные по сети)
+    \item Хранит данные нативно (Erlang term)
+    \item (Не нужно сериализовать/десериализовать данные)
+    \item Хранит данные в ETS/DEST таблицах
+    \item (Чтение и запись работают очень быстро)
   \end{itemize}
 \end{frame}
 
-\section{Section 1}
-
 \begin{frame}
-Frame 2
+ Работает внутри эрланговского кластера
+Данные доступны отовсюду в кластере (сетевая прозрачность)
+Полная реплика данных на каждой ноде
 \end{frame}
 
 \begin{frame}
-Frame 3
-\end{frame}
-
-\section{Section 2}
-
-\begin{frame}
-Frame 4
+ Фичи
+Транзакции (ACID)
+Вторичные индексы
+Миграции (структуры таблиц и данных)
+Шардинг (fragmented tables)
 \end{frame}
 
 \begin{frame}
-Frame 5
+ С точки зрения CAP теоремы
+Тут есть нюансы
+ Если с транзакциями, то CP
+И это медленно (очень)
+ Если в dirty режиме, то AP
+И тут никаких гарантий Consistency, даже "eventualy"
+ А если я хочу CA?
+Тогда просто бери ETS/DETS
+\end{frame}
+
+\section{API}
+
+\begin{frame}
+ API
+ Базовые KV операции
+read, write, delete
+ ETS/DETS API
+lookup, match, select
+ Fold
+foldl, foldr
+ QLC
+Query List Comprehension
+\end{frame}
+
+\begin{frame}
+qlc:q([X || X <- mnesia:table(shop)])
+
+qlc:q([
+    Xshop.item || X <- mnesia:table(shop),
+    Xshop.quantity < 250
+])
+
+qlc:q([
+    Xshop.item ||
+    X <- mnesia:table(shop),
+    Xshop.quantity < 250,
+    Y <- mnesia:table(cost),
+    Xshop.item =:= Ycost.name,
+    Ycost.price < 2
+])
+\end{frame}
+
+\begin{frame}
+ Транзакции
+Синхронные и "обыкновенные"
+Pessimistic locking
+Медленные
+Но без них нет консистентности данных
+\end{frame}
+
+\section{Репутация Mnesia}
+
+\begin{frame}
+ Репутация Mnesia
+Мнение широко известных в узких кругах авторитетов
+Печальный опыт с персистентными очередями в RabbitMQ
+Слухи из Стокгольма от местных разработчиков
+\end{frame}
+
+\begin{frame}
+ Репутация Mnesia
+Суть проблемы в том,
+что если нода не была корректно остановлена, а упала,
+то восстановление большой таблицы с диска может занять часы.
+\end{frame}
+
+\begin{frame}
+ Репутация Mnesia
+Downtime сервиса может длится несколько часов!
+На этом про Mnesia можно было бы забыть и не вспоминать
+но ...
+\end{frame}
+
+\section{Применение Mnesia}
+
+\begin{frame}
+ Применение Mnesia
+её можно применить с пользой
+\end{frame}
+
+\begin{frame}
+ Задача
+Кластер из нескольких эрланг-нод.
+Нужно хранить пользовательские сессии,
+так, чтобы они были доступны во всех нодах кластера.
+\end{frame}
+
+\begin{frame}
+ Задача
+Прежнее решение:
+Сессии хранятся в MySQL
+\end{frame}
+
+\begin{frame}
+ Задача
+Конечно, хочется иметь эту инфу прямо в ноде.
+Кешировать в ETS?
+Хорошо, а как обновить этот кэш на всех нодах?
+Вот если бы был распределенный кэш ...
+Постойте-ка, а Mnesia -- это что?
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Mnesia не вызывает проблем, если:
+не нужно персистентное хранение данных
+не нужны сложные запросы с транзакциями
+данные относительно дешево реплицируются (то есть, их не много)
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+in-memory хранение пользовательских сессий
+идеальный сценарий для Mnesia
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Mnesia не стоит использовать, если:
+Нужно хранить много данных
+Нужно хранить их персистентно
+Объем данных постоянно растет
+Выполняются сложные запросы к данным
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Все это -- типичные сценарии использования типичной БД
+И все это -- плохо для Mnesia
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Mnesia -- это не БД, это кэш :)
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Еще раз про ключевые преимущества:
+Данные прямо в памяти ноды, за ними не надо ходить по сети
+Данные в нативном виде, их не надо сериализовать/десериализовать
+Прозрачная репликация на все ноды кластера
+\end{frame}
+
+\begin{frame}
+ Применение Mnesia
+Что важно для нас:
+Mnesia неплохо переживает рестарты отдельных нод в кластере
+Потому что мы именно так обновляем кластер
+Но нужно знать объем данных и время их репликации
+Это этого зависит время downtime ноды при рестарте
+\end{frame}
+
+\begin{frame}
+ Вопросы
 \end{frame}
 
 \end{document}
