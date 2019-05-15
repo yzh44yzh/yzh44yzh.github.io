@@ -1,18 +1,21 @@
-\documentclass{beamer}
-\usepackage[T2A]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage[russian]{babel}
+\documentclass[9pt]{beamer}
+\usepackage{fontspec}
+\usepackage{listings}
+
+\setmainfont{Ubuntu}[]
+\setsansfont{Ubuntu}[]
+\setmonofont{Ubuntu Mono}[]
 
 % https://hartwork.org/beamer-theme-matrix/
-\usetheme{Copenhagen}
+\usetheme{Singapore}
 \usecolortheme{dove}
 \beamertemplatenavigationsymbolsempty
-
+\setbeamertemplate{headline}{}
 
 \title{Использование базы данных Mnesia в чат-сервере}
 \author{Юра Жлоба}
 \institute{Wargaming.net}
-\date{May 2019}
+\date{Май 2019}
 
 \begin{document}
 \maketitle
@@ -22,7 +25,7 @@
 \begin{frame}
   \frametitle{Mnesia}
   \framesubtitle{Распределенная key value база данных, встраиваемая в Erlang приложения.}
-  Разберемся, почему ее не рекомендуют использовать и почему все же используют.
+  Разберемся, почему ее не рекомендуют использовать и почему все же используют.\newline
   И узнаем, как она используется в чат-сервере.
 \end{frame}
 
@@ -35,23 +38,24 @@
 \end{frame}
 
 \begin{frame}
- Amnesia
-Традицию продолжила компания WhatsApp
-Они назвали свою БД
-ForgETS
+  \frametitle{Amnesia}
+  \begin{itemize}
+  \item Традицию продолжила компания WhatsApp
+    \pause
+  \item Они назвали свою БД
+    \pause
+  \item ForgETS
+  \end{itemize}
 \end{frame}
 
 \section{Фичи}
 
 \begin{frame}
-    \frametitle{Фичи}
+  \frametitle{Фичи}
   \begin{itemize}[<+->]
-    \item Работает внутри эрланговской ноды
-    \item (Не нужно передавать данные по сети)
-    \item Хранит данные нативно (Erlang term)
-    \item (Не нужно сериализовать/десериализовать данные)
-    \item Хранит данные в ETS/DEST таблицах
-    \item (Чтение и запись работают очень быстро)
+  \item Работает внутри эрланговской ноды\newline(Не нужно передавать данные по сети)
+  \item Хранит данные нативно (Erlang term)\newline(Не нужно сериализовать/десериализовать данные)
+  \item Хранит данные в ETS/DEST таблицах\newline(Чтение и запись работают очень быстро)
   \end{itemize}
 \end{frame}
 
@@ -94,7 +98,8 @@ foldl, foldr
 Query List Comprehension
 \end{frame}
 
-\begin{frame}
+\begin{frame}[fragile]
+\begin{lstlisting}[language=Erlang]
 qlc:q([X || X <- mnesia:table(shop)])
 
 qlc:q([
@@ -110,6 +115,7 @@ qlc:q([
     Xshop.item =:= Ycost.name,
     Ycost.price < 2
 ])
+\end{lstlisting}
 \end{frame}
 
 \begin{frame}
