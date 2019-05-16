@@ -1,4 +1,4 @@
-\documentclass[9pt]{beamer}
+\documentclass[10pt]{beamer}
 \usepackage{fontspec}
 \usepackage{listings}
 
@@ -12,6 +12,12 @@
 \beamertemplatenavigationsymbolsempty
 \setbeamertemplate{headline}{}
 
+\lstset{
+  language=ML,
+  keywordstyle=\color{blue},
+  backgroundcolor=\color{lightgray}
+}
+
 \title{Использование базы данных Mnesia в чат-сервере}
 \author{Юра Жлоба}
 \institute{Wargaming.net}
@@ -23,90 +29,121 @@
 \section{Интро}
 
 \begin{frame}
-  \frametitle{Mnesia}
-  \framesubtitle{Распределенная key value база данных, встраиваемая в Erlang приложения.}
-  Разберемся, почему ее не рекомендуют использовать и почему все же используют.\newline
-  И узнаем, как она используется в чат-сервере.
+\frametitle{Mnesia}
+\centering
+Распределенная key value база данных,
+\par \bigskip
+встраиваемая в Erlang приложения.
 \end{frame}
 
 \begin{frame}
-  \frametitle{Amnesia}
+\frametitle{Mnesia}
+\centering
+Почему ее не рекомендуют использовать?
+\par \bigskip
+И почему все же используют?
+\par \bigskip
+Как она используется в чат-сервере?
+\end{frame}
+
+\begin{frame}
+\frametitle{Amnesia}
+\centering
 1999 год
-Изначально база данных называлась Amnesia
-Это название не понравилось кому-то из менеджмента
-"So we dropped the A, and the name stuck." Joe Armstrong.
+\par \bigskip
+Изначально база данных называлась Amnesia.
+\par \bigskip
+Это название не понравилось кому-то из менеджмента.
+\par \bigskip
+\textcolor{gray}{"So we dropped the A, and the name stuck."} Joe Armstrong.
 \end{frame}
 
 \begin{frame}
-  \frametitle{Amnesia}
-  \begin{itemize}
-  \item Традицию продолжила компания WhatsApp
-    \pause
-  \item Они назвали свою БД
-    \pause
-  \item ForgETS
-  \end{itemize}
+\frametitle{Amnesia}
+\centering
+Традицию продолжила компания WhatsApp
+\par \bigskip
+Они назвали свою БД
+\par \bigskip
+\textbf{ForgETS}
 \end{frame}
 
 \section{Фичи}
 
 \begin{frame}
-  \frametitle{Фичи}
-  \begin{itemize}[<+->]
-  \item Работает внутри эрланговской ноды\newline(Не нужно передавать данные по сети)
-  \item Хранит данные нативно (Erlang term)\newline(Не нужно сериализовать/десериализовать данные)
-  \item Хранит данные в ETS/DEST таблицах\newline(Чтение и запись работают очень быстро)
-  \end{itemize}
+\frametitle{Фичи}
+\begin{itemize}[<+->]
+\item Работает внутри эрланговской ноды\newline
+  \textcolor{gray}{Не нужно передавать данные по сети}
+\item Хранит данные нативно (Erlang term)\newline
+  \textcolor{gray}{Не нужно сериализовать/десериализовать данные}
+\item Хранит данные в ETS/DEST таблицах\newline
+  \textcolor{gray}{Чтение и запись работают очень быстро}
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Работает внутри эрланговского кластера
+\frametitle{Фичи}
+\centering
+Работает внутри эрланговского кластера
+\par
+\bigskip
 Данные доступны отовсюду в кластере (сетевая прозрачность)
+\par
+\bigskip
 Полная реплика данных на каждой ноде
 \end{frame}
 
 \begin{frame}
- Фичи
-Транзакции (ACID)
-Вторичные индексы
-Миграции (структуры таблиц и данных)
-Шардинг (fragmented tables)
+\frametitle{Фичи}
+\begin{itemize}
+\item Транзакции (ACID)
+\item Вторичные индексы
+\item Миграции (структуры таблиц и данных)
+\item Шардинг (fragmented tables)
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- С точки зрения CAP теоремы
-Тут есть нюансы
- Если с транзакциями, то CP
-И это медленно (очень)
- Если в dirty режиме, то AP
-И тут никаких гарантий Consistency, даже "eventualy"
- А если я хочу CA?
-Тогда просто бери ETS/DETS
+\frametitle{С точки зрения CAP теоремы}
+\begin{itemize}[<+->]
+\item Если с транзакциями, то CP\newline
+  \textcolor{gray}{И это медленно (очень)}
+\item Если в dirty режиме, то AP\newline
+  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy"}
+\item А если я хочу CA?\newline
+  \textcolor{gray}{Тогда просто бери ETS/DETS}
+\end{itemize}
 \end{frame}
 
 \section{API}
 
 \begin{frame}
- API
- Базовые KV операции
-read, write, delete
- ETS/DETS API
-lookup, match, select
- Fold
-foldl, foldr
- QLC
-Query List Comprehension
+\frametitle{API}
+\begin{itemize}[<+->]
+\item Базовые KV операции\newline
+  \textcolor{gray}{read, write, delete}
+\item ETS/DETS API\newline
+  \textcolor{gray}{lookup, match, select}
+\item Fold\newline
+  \textcolor{gray}{foldl, foldr}
+\item QLC\newline
+  \textcolor{gray}{Query List Comprehension}
+\end{itemize}
 \end{frame}
 
 \begin{frame}[fragile]
-\begin{lstlisting}[language=Erlang]
+\frametitle{Query List Comprehension}
+\begin{lstlisting}
 qlc:q([X || X <- mnesia:table(shop)])
-
+\end{lstlisting}
+\begin{lstlisting}
 qlc:q([
     Xshop.item || X <- mnesia:table(shop),
     Xshop.quantity < 250
 ])
-
+\end{lstlisting}
+\begin{lstlisting}
 qlc:q([
     Xshop.item ||
     X <- mnesia:table(shop),
@@ -119,118 +156,155 @@ qlc:q([
 \end{frame}
 
 \begin{frame}
- Транзакции
+\frametitle{Транзакции}
+\centering
 Синхронные и "обыкновенные"
+\par \bigskip
 Pessimistic locking
+\par \bigskip
 Медленные
+\par \bigskip
 Но без них нет консистентности данных
 \end{frame}
 
 \section{Репутация Mnesia}
 
 \begin{frame}
- Репутация Mnesia
+\frametitle{Репутация Mnesia}
+\centering
 Мнение широко известных в узких кругах авторитетов
+\par
+\bigskip
 Печальный опыт с персистентными очередями в RabbitMQ
+\par
+\bigskip
 Слухи из Стокгольма от местных разработчиков
 \end{frame}
 
 \begin{frame}
- Репутация Mnesia
+\frametitle{Репутация Mnesia}
+\centering
 Суть проблемы в том,
+\par \bigskip
 что если нода не была корректно остановлена, а упала,
+\par \bigskip
 то восстановление большой таблицы с диска может занять часы.
 \end{frame}
 
 \begin{frame}
- Репутация Mnesia
-Downtime сервиса может длится несколько часов!
+\frametitle{Репутация Mnesia}
+\centering
+\textcolor{red}{Downtime сервиса может длится несколько часов!}
+\par \bigskip
 На этом про Mnesia можно было бы забыть и не вспоминать
+\par \bigskip
 но ...
 \end{frame}
 
 \section{Применение Mnesia}
 
 \begin{frame}
- Применение Mnesia
-её можно применить с пользой
+\frametitle{Применение Mnesia}
+\centering
+но её можно применить с пользой
 \end{frame}
 
 \begin{frame}
- Задача
+\frametitle{Задача}
+\centering
 Кластер из нескольких эрланг-нод.
+\par \bigskip
 Нужно хранить пользовательские сессии,
+\par \bigskip
 так, чтобы они были доступны во всех нодах кластера.
 \end{frame}
 
 \begin{frame}
- Задача
+\frametitle{Задача}
+\centering
 Прежнее решение:
+\par \bigskip
 Сессии хранятся в MySQL
 \end{frame}
 
 \begin{frame}
- Задача
-Конечно, хочется иметь эту инфу прямо в ноде.
-Кешировать в ETS?
-Хорошо, а как обновить этот кэш на всех нодах?
-Вот если бы был распределенный кэш ...
-Постойте-ка, а Mnesia -- это что?
+\frametitle{Задача}
+\begin{itemize}[<+->]
+\item Конечно, хочется иметь эту инфу прямо в ноде.
+\item Кешировать в ETS?
+\item Хорошо, а как обновить этот кэш на всех нодах?
+\item Вот если бы был распределенный кэш ...
+\item Постойте-ка, а Mnesia -- это что?
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
+\frametitle{Применение Mnesia}
 Mnesia не вызывает проблем, если:
-не нужно персистентное хранение данных
-не нужны сложные запросы с транзакциями
-данные относительно дешево реплицируются (то есть, их не много)
+\begin{itemize}
+\item не нужно персистентное хранение данных
+\item не нужны сложные запросы с транзакциями
+\item данные относительно дешево реплицируются
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
-in-memory хранение пользовательских сессий
-идеальный сценарий для Mnesia
-\end{frame}
-
-\begin{frame}
- Применение Mnesia
+\frametitle{Применение Mnesia}
 Mnesia не стоит использовать, если:
-Нужно хранить много данных
-Нужно хранить их персистентно
-Объем данных постоянно растет
-Выполняются сложные запросы к данным
+\begin{itemize}
+\item Нужно хранить много данных
+\item Нужно хранить их персистентно
+\item Объем данных постоянно растет
+\item Выполняются сложные запросы к данным
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
+\frametitle{Применение Mnesia}
+\centering
 Все это -- типичные сценарии использования типичной БД
+\par \bigskip
 И все это -- плохо для Mnesia
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
-Mnesia -- это не БД, это кэш :)
+\frametitle{Применение Mnesia}
+\centering
+in-memory хранение пользовательских сессий
+\par \bigskip
+идеальный сценарий для Mnesia
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
+\frametitle{Применение Mnesia}
+\centering
+\textbf{Mnesia -- это не БД, это кэш :)}
+\end{frame}
+
+\begin{frame}
+\frametitle{Применение Mnesia}
 Еще раз про ключевые преимущества:
-Данные прямо в памяти ноды, за ними не надо ходить по сети
-Данные в нативном виде, их не надо сериализовать/десериализовать
-Прозрачная репликация на все ноды кластера
+\begin{itemize}
+\item Данные прямо в памяти ноды,\newline за ними не надо ходить по сети
+\item Данные в нативном виде,\newline их не надо сериализовать/десериализовать
+\item Прозрачная репликация на все ноды кластера
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Применение Mnesia
+\frametitle{Применение Mnesia}
 Что важно для нас:
-Mnesia неплохо переживает рестарты отдельных нод в кластере
-Потому что мы именно так обновляем кластер
-Но нужно знать объем данных и время их репликации
-Это этого зависит время downtime ноды при рестарте
+\begin{itemize}
+\item Mnesia неплохо переживает рестарты\newline отдельных нод в кластере
+\item Потому что мы именно так обновляем кластер
+\item Но нужно знать объем данных и время их репликации
+\item Это этого зависит время downtime ноды при рестарте
+\end{itemize}
 \end{frame}
 
 \begin{frame}
- Вопросы
+\centering
+Вопросы?
 \end{frame}
 
 \end{document}
