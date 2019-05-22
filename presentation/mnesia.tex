@@ -104,18 +104,6 @@
 \end{itemize}
 \end{frame}
 
-\begin{frame}
-\frametitle{С точки зрения CAP теоремы}
-\begin{itemize}[<+->]
-\item Если с транзакциями, то CP\newline
-  \textcolor{gray}{И это медленно (очень)}
-\item Если в dirty режиме, то AP\newline
-  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy"}
-\item А если я хочу CA?\newline
-  \textcolor{gray}{Тогда просто бери ETS/DETS}
-\end{itemize}
-\end{frame}
-
 \section{API}
 
 \begin{frame}
@@ -165,6 +153,33 @@ Pessimistic locking
 Медленные
 \par \bigskip
 Но без них нет консистентности данных
+\end{frame}
+
+\section{Mnesia как распределенная система}
+
+\begin{frame}
+\frametitle{Консистентность данных}
+\begin{itemize}[<+->]
+\item Транзакции работают через 2PC
+\item Strict quorum protocol\newline
+  \textcolor{gray}{все ноды должны подтвердить транзакцию}
+\item Гибкие настройки репликации\newline
+  \textcolor{gray}{можно явно указать, на каких нодах и как хранить данные}
+\item Неплохо переживает рестарты нод в кластере
+\item Плохо переживает network partition
+\end{itemize}
+\end{frame}
+
+\begin{frame}
+\frametitle{С точки зрения CAP теоремы}
+\begin{itemize}[<+->]
+\item Если с транзакциями, то CP\newline
+  \textcolor{gray}{P тут не настоящий}
+\item Если в dirty режиме, то AP\newline
+  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy"}
+\item А если я хочу CA?\newline
+  \textcolor{gray}{Тогда просто бери ETS/DETS}
+\end{itemize}
 \end{frame}
 
 \section{Репутация Mnesia}
@@ -225,6 +240,10 @@ Pessimistic locking
 Прежнее решение:
 \par \bigskip
 Сессии хранятся в MySQL
+\par \bigskip
+Данные консистентны и доступны все нодам
+\par \bigskip
+Latency больше, чем могло бы быть
 \end{frame}
 
 \begin{frame}
@@ -242,15 +261,15 @@ Pessimistic locking
 \frametitle{Применение Mnesia}
 Mnesia не вызывает проблем, если:
 \begin{itemize}
-\item не нужно персистентное хранение данных
-\item не нужны сложные запросы с транзакциями
-\item данные относительно дешево реплицируются
+\item Не нужно персистентное хранение данных
+\item Не нужны сложные запросы с транзакциями
+\item Данные относительно дешево реплицируются
 \end{itemize}
 \end{frame}
 
 \begin{frame}
 \frametitle{Применение Mnesia}
-Mnesia не стоит использовать, если:
+С Mnesia будут проблемы, если:
 \begin{itemize}
 \item Нужно хранить много данных
 \item Нужно хранить их персистентно
@@ -270,9 +289,21 @@ Mnesia не стоит использовать, если:
 \begin{frame}
 \frametitle{Применение Mnesia}
 \centering
-in-memory хранение пользовательских сессий
+идеальный сценарий для Mnesia:
 \par \bigskip
-идеальный сценарий для Mnesia
+in-memory хранение пользовательских сессий
+\end{frame}
+
+\begin{frame}
+\frametitle{Применение Mnesia}
+\centering
+В такой роли ее используют:
+\begin{itemize}
+\item WhatsUp (на ранних этапах)
+\item League of Legends Chat
+\item Discord
+\item Ejabberd
+\end{itemize}
 \end{frame}
 
 \begin{frame}
