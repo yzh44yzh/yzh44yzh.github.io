@@ -173,11 +173,11 @@ Pessimistic locking.
 \begin{frame}
 \frametitle{С точки зрения CAP теоремы}
 \begin{itemize}[<+->]
-\item Если с транзакциями, то CP,\newline
-  \textcolor{gray}{P тут не настоящий.}
-\item Если в dirty режиме, то AP,\newline
-  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy".}
-\item А если я хочу CA?,\newline
+\item Это CA система,\newline
+  \textcolor{gray}{не устойчива к network partition (P).}
+\item Можно повысить A отказавшись от C.\newline
+  \textcolor{gray}{dirty mode, без транзакций.}
+\item А если мне вообще не нужна репликация на несколько нод?\newline
   \textcolor{gray}{Тогда просто бери ETS/DETS.}
 \end{itemize}
 \end{frame}
