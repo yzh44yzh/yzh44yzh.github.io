@@ -61,11 +61,11 @@
 \begin{frame}
 \frametitle{Amnesia}
 \centering
-Традицию продолжила компания WhatsApp
+Традицию продолжила компания WhatsApp.
 \par \bigskip
 Они назвали свою БД
 \par \bigskip
-\textbf{ForgETS}
+\textbf{ForgETS}.
 \end{frame}
 
 \section{Фичи}
@@ -73,34 +73,34 @@
 \begin{frame}
 \frametitle{Фичи}
 \begin{itemize}[<+->]
-\item Работает внутри эрланговской ноды\newline
-  \textcolor{gray}{Не нужно передавать данные по сети}
-\item Хранит данные нативно (Erlang term)\newline
-  \textcolor{gray}{Не нужно сериализовать/десериализовать данные}
-\item Хранит данные в ETS/DEST таблицах\newline
-  \textcolor{gray}{Чтение и запись работают очень быстро}
+\item Работает внутри эрланговской ноды,\newline
+  \textcolor{gray}{не нужно передавать данные по сети.}
+\item Хранит данные нативно (Erlang term),\newline
+  \textcolor{gray}{не нужно сериализовать/десериализовать данные.}
+\item Хранит данные в ETS/DEST таблицах,\newline
+  \textcolor{gray}{чтение и запись работают очень быстро.}
 \end{itemize}
 \end{frame}
 
 \begin{frame}
 \frametitle{Фичи}
 \centering
-Работает внутри эрланговского кластера
+Работает внутри эрланговского кластера.
 \par
 \bigskip
-Данные доступны отовсюду в кластере (сетевая прозрачность)
+Данные доступны отовсюду в кластере \textcolor{gray}{(сетевая прозрачность)}.
 \par
 \bigskip
-Полная реплика данных на каждой ноде
+Полная реплика данных на каждой ноде.
 \end{frame}
 
 \begin{frame}
 \frametitle{Фичи}
 \begin{itemize}
-\item Транзакции (ACID)
-\item Вторичные индексы
-\item Миграции (структуры таблиц и данных)
-\item Шардинг (fragmented tables)
+\item Транзакции \textcolor{gray}{(ACID)}.
+\item Вторичные индексы.
+\item Миграции \textcolor{gray}{(структуры таблиц и данных)}.
+\item Шардинг \textcolor{gray}{(fragmented tables)}.
 \end{itemize}
 \end{frame}
 
@@ -109,14 +109,14 @@
 \begin{frame}
 \frametitle{API}
 \begin{itemize}[<+->]
-\item Базовые KV операции\newline
-  \textcolor{gray}{read, write, delete}
-\item ETS/DETS API\newline
-  \textcolor{gray}{lookup, match, select}
-\item Fold\newline
-  \textcolor{gray}{foldl, foldr}
+\item Базовые KV операции:\newline
+  \textcolor{gray}{read, write, delete.}
+\item ETS/DETS API:\newline
+  \textcolor{gray}{lookup, match, select.}
+\item Fold:\newline
+  \textcolor{gray}{foldl, foldr.}
 \item QLC\newline
-  \textcolor{gray}{Query List Comprehension}
+  \textcolor{gray}{Query List Comprehension.}
 \end{itemize}
 \end{frame}
 
@@ -146,13 +146,13 @@ qlc:q([
 \begin{frame}
 \frametitle{Транзакции}
 \centering
-Синхронные и "обыкновенные"
+Синхронные и "обыкновенные".
 \par \bigskip
-Pessimistic locking
+Pessimistic locking.
 \par \bigskip
-Медленные
+Медленные.
 \par \bigskip
-Но без них нет консистентности данных
+Но без них нет консистентности данных.
 \end{frame}
 
 \section{Mnesia как распределенная система}
@@ -160,25 +160,25 @@ Pessimistic locking
 \begin{frame}
 \frametitle{Консистентность данных}
 \begin{itemize}[<+->]
-\item Транзакции работают через 2PC
-\item Strict quorum protocol\newline
-  \textcolor{gray}{все ноды должны подтвердить транзакцию}
-\item Гибкие настройки репликации\newline
-  \textcolor{gray}{можно явно указать, на каких нодах и как хранить данные}
-\item Неплохо переживает рестарты нод в кластере
-\item Плохо переживает network partition
+\item Транзакции работают через 2PC.
+\item Strict quorum protocol,\newline
+  \textcolor{gray}{все ноды должны подтвердить транзакцию.}
+\item Гибкие настройки репликации,\newline
+  \textcolor{gray}{можно явно указать, на каких нодах и как хранить данные.}
+\item Неплохо переживает рестарты нод в кластере.
+\item Плохо переживает network partition.
 \end{itemize}
 \end{frame}
 
 \begin{frame}
 \frametitle{С точки зрения CAP теоремы}
 \begin{itemize}[<+->]
-\item Если с транзакциями, то CP\newline
-  \textcolor{gray}{P тут не настоящий}
-\item Если в dirty режиме, то AP\newline
-  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy"}
-\item А если я хочу CA?\newline
-  \textcolor{gray}{Тогда просто бери ETS/DETS}
+\item Если с транзакциями, то CP,\newline
+  \textcolor{gray}{P тут не настоящий.}
+\item Если в dirty режиме, то AP,\newline
+  \textcolor{gray}{И тут никаких гарантий Consistency, даже "eventualy".}
+\item А если я хочу CA?,\newline
+  \textcolor{gray}{Тогда просто бери ETS/DETS.}
 \end{itemize}
 \end{frame}
 
@@ -187,13 +187,13 @@ Pessimistic locking
 \begin{frame}
 \frametitle{Репутация Mnesia}
 \centering
-Мнение широко известных в узких кругах авторитетов
+Мнение широко известных в узких кругах авторитетов.
 \par
 \bigskip
-Печальный опыт с персистентными очередями в RabbitMQ
+Печальный опыт с персистентными очередями в RabbitMQ.
 \par
 \bigskip
-Слухи из Стокгольма от местных разработчиков
+Слухи из Стокгольма от местных разработчиков.
 \end{frame}
 
 \begin{frame}
@@ -211,7 +211,7 @@ Pessimistic locking
 \centering
 \textcolor{red}{Downtime сервиса может длится несколько часов!}
 \par \bigskip
-На этом про Mnesia можно было бы забыть и не вспоминать
+На этом про Mnesia можно было бы забыть и не вспоминать,
 \par \bigskip
 но ...
 \end{frame}
@@ -221,7 +221,7 @@ Pessimistic locking
 \begin{frame}
 \frametitle{Применение Mnesia}
 \centering
-но её можно применить с пользой
+Но её можно применить с пользой.
 \end{frame}
 
 \begin{frame}
@@ -235,15 +235,12 @@ Pessimistic locking
 \end{frame}
 
 \begin{frame}
-\frametitle{Задача}
-\centering
-Прежнее решение:
-\par \bigskip
-Сессии хранятся в MySQL
-\par \bigskip
-Данные консистентны и доступны все нодам
-\par \bigskip
-Latency больше, чем могло бы быть
+\frametitle{Прежнее решение}
+\begin{itemize}[<+->]
+\item Сессии хранятся в MySQL.
+\item Данные консистентны и доступны все нодам.
+\item Latency больше, чем могло бы быть.
+\end{itemize}
 \end{frame}
 
 \begin{frame}
@@ -258,52 +255,52 @@ Latency больше, чем могло бы быть
 \end{frame}
 
 \begin{frame}
-\frametitle{Применение Mnesia}
-Mnesia не вызывает проблем, если:
+\frametitle{Mnesia не вызывает проблем, если:}
 \begin{itemize}
-\item Не нужно персистентное хранение данных
-\item Не нужны сложные запросы с транзакциями
-\item Данные относительно дешево реплицируются
+\item Не нужно персистентное хранение данных.
+\item Не нужны сложные запросы с транзакциями.
+\item Данные относительно дешево реплицируются.
 \end{itemize}
 \end{frame}
 
 \begin{frame}
-\frametitle{Применение Mnesia}
-С Mnesia будут проблемы, если:
+\frametitle{С Mnesia будут проблемы, если:}
 \begin{itemize}
-\item Нужно хранить много данных
-\item Нужно хранить их персистентно
-\item Объем данных постоянно растет
-\item Выполняются сложные запросы к данным
+\item Нужно хранить много данных.
+\item Нужно хранить их персистентно.
+\item Объем данных постоянно растет.
+\item Выполняются сложные запросы к данным.
 \end{itemize}
 \end{frame}
 
 \begin{frame}
 \frametitle{Применение Mnesia}
 \centering
-Все это -- типичные сценарии использования типичной БД
+Все это -- типичные сценарии использования типичной БД.
 \par \bigskip
-И все это -- плохо для Mnesia
+И все это -- плохо для Mnesia.
 \end{frame}
 
 \begin{frame}
 \frametitle{Применение Mnesia}
 \centering
-идеальный сценарий для Mnesia:
+Идеальный сценарий для Mnesia:
 \par \bigskip
-in-memory хранение пользовательских сессий
+in-memory хранение пользовательских сессий.
 \end{frame}
 
 \begin{frame}
 \frametitle{Применение Mnesia}
 \centering
 В такой роли ее используют:
-\begin{itemize}
-\item WhatsUp (на ранних этапах)
-\item League of Legends Chat
-\item Discord
-\item Ejabberd
-\end{itemize}
+\par \bigskip
+WhatsUp \textcolor{gray}{(на ранних этапах)},
+\par \bigskip
+League of Legends Chat,
+\par \bigskip
+Discord,
+\par \bigskip
+Ejabberd.
 \end{frame}
 
 \begin{frame}
@@ -313,23 +310,23 @@ in-memory хранение пользовательских сессий
 \end{frame}
 
 \begin{frame}
-\frametitle{Применение Mnesia}
-Еще раз про ключевые преимущества:
+\frametitle{Еще раз про ключевые преимущества}
 \begin{itemize}
-\item Данные прямо в памяти ноды,\newline за ними не надо ходить по сети
-\item Данные в нативном виде,\newline их не надо сериализовать/десериализовать
-\item Прозрачная репликация на все ноды кластера
+\item Данные прямо в памяти ноды,\newline
+  \textcolor{gray}{за ними не надо ходить по сети}.
+\item Данные в нативном виде,\newline
+  \textcolor{gray}{их не надо сериализовать/десериализовать}.
+\item Прозрачная репликация на все ноды кластера.
 \end{itemize}
 \end{frame}
 
 \begin{frame}
-\frametitle{Применение Mnesia}
-Что важно для нас:
+\frametitle{Что важно для нас}
 \begin{itemize}
-\item Mnesia неплохо переживает рестарты\newline отдельных нод в кластере
-\item Потому что мы именно так обновляем кластер
-\item Но нужно знать объем данных и время их репликации
-\item Это этого зависит время downtime ноды при рестарте
+\item Mnesia неплохо переживает рестарты\newline отдельных нод в кластере.
+\item Потому что мы именно так обновляем кластер.
+\item Но нужно знать объем данных и время их репликации.
+\item Это этого зависит время downtime ноды при рестарте.
 \end{itemize}
 \end{frame}
 
