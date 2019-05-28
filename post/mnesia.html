@@ -1,0 +1,427 @@
+<h1>Mnesia -- распределенное хранилище в эрланговском кластере</h1>
+
+<p>О чем этот пост:
+  <ul>
+    <li>Что такое Mnesia?</li>
+    <li>Почему ее не рекомендуют использовать?</li>
+    <li>И почему все же используют?</li>
+    <li>Как она используется в моем проекте (чат-сервере)?</li>
+  </ul>
+</p>
+
+
+<h2>Интро</h2>
+
+Mnesia -- это распределенное хранилище данных, встраиваемое в Erlang приложения.
+
+построена поверх ETS/DETS
+добавлена распределенность
+транзакции
+и другие фишки, которые мы рассмотрим ниже
+
+
+реляционной гибридной объектной модели данных
+Mnesia is a layer built on top of ETS and DETS to add a lot of functionality to these two databases.
+The solution is to merge the efficiency and simplicity of ETS and Dets tables with the Erlang distribution and to add a transaction layer on top.
+
+The original name was Amnesia. One of our bosses didn’t like the name. He said, “You can’t possibly call it Amnesia—you can’t have a database that forgets things!” So we dropped the A, and the name stuck.
+Joe Armstrong.
+
+Традицию такого нейминга продолжила компания WhatsApp.
+Они назвали свою БД <a href="https://www.youtube.com/watch?v=kHzmrWD7iEY">ForgETS</a>
+
+
+Mnesia - A Distributed Robust DBMS for Telecommunications Applications
+published in 1999,
+the authors: Håkan Mattsson, Hans Nilsson, Claes Wikstrom
+http://www.erlang.se/publications/mnesia_overview.pdf
+
+Киллер-фичи:
+
+Работает внутри эрланговской ноды,
+не нужно передавать данные по сети.
+
+Полная реплика данных на каждой ноде.
+Данные доступны отовсюду в кластере (сетевая прозрачность)
+
+Хранит данные нативно (Erlang term),
+не нужно сериализовать/десериализовать данные.
+
+Хранит данные в ETS/DEST таблицах,
+чтение и запись работают очень быстро.
+
+
+
+<h2>Фичи</h2>
+
+\item Транзакции \textcolor{gray}{(ACID)}.
+\item Вторичные индексы.
+\item Миграции \textcolor{gray}{(структуры таблиц и данных)}.
+\item Шардинг \textcolor{gray}{(fragmented tables)}.
+
+распределенность
+ACID transaction support.
+вторичные индексы
+natively store and return any Erlang term out of the box
+RAM или диск
+механизмы миграции для структуры таблиц и данных
+шардинг Mnesia supports “fragmented tables.” (horizontal partitioning in database terminology).
+
+Note that Mnesia is not meant to replace your standard SQL database,
+and it's also not meant to handle terabytes of data across a large number of data centers
+as often claimed by the giants of the NoSQL world.
+
+Mnesia is rather made for smaller amounts of data, on a limited number of nodes.
+
+You will want to use Mnesia when you know it will run on a fixed number of nodes,
+have an idea of how much data it will require.
+
+Mnesia uses a complex system of transaction logs and checkpoints that allow to create a disk-based backup of the table in memory.
+
+A Mnesia transaction allows to run a series of database operations as a single functional block.
+The whole block will run on all nodes or none of them; it succeeds entirely or fails entirely.
+it will be synchronous for operations on the local node,
+but it will only wait for the confirmation from other nodes that they will commit the transaction, not that they have done it.
+If it doesn't, possibly due to failures in the network or hardware, the transaction will be reverted at a later point in time;
+
+Synchronous transactions will wait for the final confirmation for all other nodes before returning, making sure everything went fine 100% of the way.
+
+Query List Comprehensions are basically a compiler trick using parse transforms that let you use list comprehensions for any data structure that can be searched and iterated through.
+
+The strategy that Mnesia uses for this is a form of pessimistic locking. Whenever the Mnesia transaction manager accesses a table, it tries to lock the record or the entire table depending upon the context. If it detects that this might lead to deadlock, it immediately aborts the transaction and undoes any changes it has made.
+If the transaction initially fails because some other process is accessing the data, the system waits for a short time and retries the transaction. One consequence of this is that the code inside the transaction fun might be evaluated a large number of times.
+For this reason, the code inside a transaction fun should not do any- thing that has any side effects.
+
+
+<h2>API</h2>
+
+- базовый: read, write, delete
+- ets: (lookup, match, select)
+- foldl and foldr for folds over entire tables
+- functions to manipulate tables themselves: transform_table or add_table_index.
+- Query List Comprehensions
+
+query list comprehension  qlc
+http://erlang.org/doc/man/qlc.html
+
+qlc:q([X || X <- mnesia:table(shop)])
+
+qlc:q([
+    Xshop.item || X <- mnesia:table(shop),
+    Xshop.quantity < 250
+])
+
+qlc:q([
+    Xshop.item ||
+    X <- mnesia:table(shop),
+    Xshop.quantity < 250,
+    Y <- mnesia:table(cost),
+    Xshop.item =:= Ycost.name,
+    Ycost.price < 2
+])
+
+\frametitle{Транзакции}
+
+Синхронные и "обыкновенные".
+
+Pessimistic locking. (TODO подробности)
+
+Медленные.
+
+Но без них нет консистентности данных.
+
+
+<h2>Mnesia как распределенная система</h2>
+
+\frametitle{Консистентность данных}
+\item Транзакции работают через 2PC.
+\item Strict quorum protocol,\newline
+  \textcolor{gray}{все ноды должны подтвердить транзакцию.}
+\item Гибкие настройки репликации,\newline
+  \textcolor{gray}{можно явно указать, на каких нодах и как хранить данные.}
+\item Неплохо переживает рестарты нод в кластере.
+\item Плохо переживает network partition.
+
+\frametitle{С точки зрения CAP теоремы}
+\item Это CA система,\newline
+  \textcolor{gray}{не устойчива к network partition (P).}
+\item Можно повысить A отказавшись от C.\newline
+  \textcolor{gray}{dirty mode, без транзакций.}
+\item А если мне вообще не нужна репликация на несколько нод?\newline
+  \textcolor{gray}{Тогда просто бери ETS/DETS.}
+
+
+Распределенность.
+There are basically two reasons for using more than one table replica: fault tolerance and speed.
+
+Транзакции vs dirty mode.
+
+что там с точки зрения CAP?
+
+If we refer to the CAP theorem, Mnesia sits on the CP side, rather than the AP side
+
+имеется в виду конфигурация кластера.
+Какие таблицы хранятся на каких нодах.
+how to store tables on disk, how to load them, and what other nodes they should be synchronized with
+довольно гибкая система, где можно явно указать, какие таблицы на каких нодах должны быть, и с каким типом хранения:
+- ram_copies -- all data is stored exclusively in ETS, so memory only.
+- disc_copies -- data is stored both in ETS and on disk
+- disc_only_copies -- data is stored only in DETS (for backup, не для запросов)
+
+A schema is a collection of table definitions that describe your database. It covers which of your tables are stored on RAM, disk, or both, alongside their configuration charac- teristics and the format of the data they will contain. These characteristics may differ from node to node, as you might want your table to have its disk copies on the operation and maintenance node but have RAM-only copies on the transaction nodes.
+
+For large persistent tables, or tables that were incorrectly closed and whose backup files need repair, other applications might try to access the table even if it has not been properly loaded. Should this happen, the process crashes with the error no_exists. To avoid this, you should call:
+mnesia:wait_for_tables(TableList, TimeOut)
+
+One of the biggest problems when using Mnesia in a distributed environment is the presence of partitioned networks.
+Mnesia knows the tables are partitioned and will report this event so that you can act on it.
+In Mnesia, you can pick the master node by calling the following function:
+mnesia:set_master_nodes(Table, Nodes).
+Mnesia will automatically take the contents of the master node, duplicating it to the partitioned nodes and bringing them back in sync.
+А другие варианты есть?
+
+
+<h2>Репутация Mnesia</h2>
+
+Мнение широко известных в узких кругах авторитетов.
+
+Печальный опыт с персистентными очередями в RabbitMQ.
+
+Слухи из Стокгольма от местных разработчиков.
+
+год 2011. Журнал fprog.ru еще выходит (всего 7 номеров было)
+Я бросаю флэш и ухожу в бэкенд. Начинаю изучать эрланг.
+Ульяновск. Лев Валкин. About Echo.
+Riak, PostgreSQL.
+
+TODO: Хорошо бы найти оригинал цитаты Льва Валкина про то, что эрланг рулез, мнезия г..но.
+Прочесал блог до 2010 года, не нашел. Может, и не в блоге это было...
+
+Я долго следовал рекомендациям Валкина. И поныне для меня Erlang -- язык №1, и PostgreSQL -- БД №1.
+Как долго живут стериотипы, если ты начинающий, а тебе советует авторитет :)
+
+Варгейминг. RabbitMQ, проблемы с персистентными очередями.
+Я проникся, и долго не использовал персистентность в RabbitMQ.
+Потом таки начал использовать, но там была уже реализация не на Mnesia.
+
+Кларна -- по слухам от тамошних разработчиков, мучаются с Mnesia, мечтают о PostgreSQL.
+Там ее используют как полноценную базу данных.
+
+When dealing with large tables containing millions of rows, if you are not using infinity as a timeout, you must ensure that the TimeOut value is at least a few minutes, *if not hours*, for extremely large, fragmented, disk-based tables.
+Cesarini.
+
+Вот это "if not hours" -- главная причина не использовать Mnesia.
+
+Суть проблемы в том,
+что если нода не была корректно остановлена, а упала,
+то восстановление большой таблицы с диска может занять часы.
+
+\textcolor{red}{Downtime сервиса может длится несколько часов!}
+На этом про Mnesia можно было бы забыть и не вспоминать,
+но ...
+Но её можно применить с пользой.
+
+
+<h2>Применение Mnesia</h2>
+
+* Что изменило мое мнение?
+
+Изучение подходов в других чатах.
+WhatsUp, Lol, Discord. (TODO пересмотреть эти материалы, что там полезного про мнезию? ссылки).
+WhatsUp потом сделали ForgETS.
+
+А почему, собственно, не использовать Mnesia в ситуациях, когда персистентность не нужна?
+
+* Наш сценарий использования
+
+Кластер из нескольких эрланг-нод.
+Нужно хранить пользовательские сессии,
+так, чтобы они были доступны во всех нодах кластера.
+
+
+Старый вариант -- хранение сессий в MySQL.
+Преимущество: консистентное состояние, доступное любой ноде в кластере.
+Недостатки: доступны по сети, с сериализацией. Еще и хранится на диске, хотя это не нужно. Хотя это можно было бы выключить.
+
+\item Конечно, хочется иметь эту инфу прямо в ноде.
+\item Кешировать в ETS?
+\item Хорошо, а как обновить этот кэш на всех нодах?
+\item Вот если бы был распределенный кэш ...
+\item Постойте-ка, а Mnesia -- это что?
+
+Пошли другим путем -- попробовали Mnesia.
+
+* Преимущества. Где Mnesia подходит.
+
+\frametitle{Mnesia не вызывает проблем, если:}
+\item Не нужно персистентное хранение данных.
+\item Не нужны сложные запросы с транзакциями.
+\item Данные относительно дешево реплицируются.
+
+\frametitle{С Mnesia будут проблемы, если:}
+\item Нужно хранить много данных.
+\item Нужно хранить их персистентно.
+\item Объем данных постоянно растет.
+\item Выполняются сложные запросы к данным.
+
+Идеальный сценарий для Mnesia:
+in-memory хранение пользовательских сессий.
+
+В такой роли ее используют:
+WhatsUp \textcolor{gray}{(на ранних этапах)},
+League of Legends Chat,
+Discord,
+Ejabberd.
+
+<b>Mnesia -- это не БД, это кэш :)</b>
+
+
+- в памяти ноды, не нужно передавать данные по сети
+- в нативных данных, не нужна сериализация
+run in the same address space as the application
+хранит эрланг-объекты, запросы пишутся на эрланг,
+нет накладных расходов на сериализацию/десериализацию и передачу данных по tcp
+
+It is the perfect choice for caching all of the user session data.
+Once users have logged on, it can be read from a persistent storage medium and duplicated across a cluster of computers for redundancy reasons.
+
+APIs, all running in the same memory space and controlled uniformly by an Erlang system.
+
+If one node crashes, the system will still work, but the number of replicas will be reduced. When the crashed node comes back online, it will resynchronize with the other nodes where the replicas are kept.
+
+Мнезия нужна, если:
+- распределенный in memory кэш
+  (если не нужна распределенность, то хватит ets)
+- относительно мало данных, и заранее понятно, сколько их будет
+- простые запросы без транзакций
+
+
+* Недостатки. Где Mnesia не подходит.
+
+You do not want to use Mnesia if your system requires the following:
+• Simple key-value lookup
+• A storage medium for large binaries such as pictures or audio files
+• A persistent log
+• A database that has to store gigabytes of data
+• A large data archive that will never stop growing
+
+<h3>Пример</h3>
+
+Модель данных:
+#+BEGIN_SRC
+-record(t_client_session, {
+    bare_jid :: {binary(), binary()},
+    resource :: binary(),
+    priority :: integer(),
+    agent_pid :: pid(),
+    agent_node :: atom()
+}).
+
+Attrs = [
+    {type, set},
+    {attributes, record_info(fields, t_client_session)},
+    {index, [#t_client_session.agent_pid]},
+    {ram_copies, [node()]}
+],
+Res = mnesia:create_table(t_client_session, Attrs),
+#+END_SRC
+
+Запросы:
+#+BEGIN_SRC
+-spec save_session(#t_client_session{}) -> ok.
+save_session(Session) ->
+    F = fun() -> mnesia:write(Session) end,
+    mnesia:activity(async_dirty, F),
+    ok.
+
+-spec get_sessions(binary(), binary()) -> [#t_client_session{}].
+get_sessions(Node, Host) ->
+    BareJid = {Node, Host},
+    F = fun() -> mnesia:match_object(#t_client_session{_ = '_', bare_jid = BareJid}) end,
+    mnesia:activity(async_dirty, F).
+#+END_SRC
+
+Работа в кластере:
+#+BEGIN_SRC
+init() ->
+    Cluster = ['alice@127.0.0.1', 'bob@127.0.0.1', 'helen@127.0.0.1', 'john@127.0.0.1'],
+    Nodes = lists:delete(node(), Cluster),
+    case mnesia:change_config(extra_db_nodes, Nodes) of
+        {ok, ConnectedNodes} ->
+            init_sessions_storage();
+        {error, Reason} = E ->
+            ?log_error([mnesia, change_config, error, Reason, Nodes]),
+            E
+    end.
+
+init_sessions_storage() ->
+    Table = t_client_session,
+    Attrs = [ ... ],
+    case mnesia:create_table(Table, Attrs) of
+        {atomic, ok} -> ok;
+        {aborted, {already_exists, Table}} ->
+            mnesia:add_table_copy(Table, node(), ram_copies), % measure time, update metrics
+            Timeout = 20000, % get from config
+            Res = mnesia:wait_for_tables([Table], Timeout), % measure time, update metrics
+            case Res of
+                ok -> ok;
+                {timeout, BadTabList} ->
+                    ?log_error([mnesia, wait_for_tables, Table, timeout, BadTabList]),
+                    {error, timeout};
+                {error, Reason} = E ->
+                    ?log_error([mnesia, wait_for_tables, Table, error, Reason]),
+                    E
+            end;
+        {aborted, Reason} = E ->
+            ?log_error([mnesia, create_table, Table, aborted, Reason]),
+            {error, E}
+    end.
+#+END_SRC
+
+Опасения.
+Какие есть в кластере? целостность данных. Скорость копирования всей таблицы на новую ноду.
+
+Перф тесты.
+выйграли по CPU и latency. В прод еще не вышли.
+
+\frametitle{Что важно для нас}
+\item Mnesia неплохо переживает рестарты\newline отдельных нод в кластере.
+\item Потому что мы именно так обновляем кластер.
+\item Но нужно знать объем данных и время их репликации.
+\item Это этого зависит время downtime ноды при рестарте.
+
+Сколько мы ожидаем там данных? перф-тестили столько-то. Скорость копирования такая-то.
+
+1 запись -- 120 байт.
+2М записей -- 230 Мб (1840 Мбит)
+В сети 1Гб/сек нужно 2 секунды.
+
+10М записей - 2300 Мб (18400 Мбит)
+В сети 1Гб/сек нужно 20 секунд.
+
+На перф тесте у нас синхронизация занимала около секунды, но это синтетические данные.
+Но это не одна таблица.
+
+\frametitle{Еще раз про ключевые преимущества}
+\item Данные прямо в памяти ноды,\newline
+  \textcolor{gray}{за ними не надо ходить по сети}.
+\item Данные в нативном виде,\newline
+  \textcolor{gray}{их не надо сериализовать/десериализовать}.
+\item Прозрачная репликация на все ноды кластера.
+
+
+
+<h2>Ссылки</h2>
+
+Fred Hebert. Learn You Some Erlang.
+https://learnyousomeerlang.com/mnesia
+
+Joe Armstrong. Programming Erlang, Chapter 17.
+
+Francesco Cesarini. Erlang Programming, Chapter 13.
+
+Mnesia User’s Guide
+http://erlang.org/doc/apps/mnesia/Mnesia_chap1.html
+
+Mnesia Reference Manual
+http://erlang.org/doc/man/mnesia.html
