@@ -1,0 +1,476 @@
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Примеры использования Erlang Logger</title>
+    <link rel="stylesheet" type="text/css" href="../css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="../css/main.css" />
+    <link rel="stylesheet" href="../css/hl_styles/default.css">
+    <script src="../js/highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+</head>
+<body>
+
+<div id="header">
+    <div id="main_title">
+        <a href="../blog.html" style="color:#013;">Про Erlang и про всякое</a>
+    </div>
+    <div id="profile_link">
+        <a href="https://www.facebook.com/yuri.zhloba" style="color:#013;">Юра Жлоба</a>
+    </div>
+</div>
+
+<div id="content">
+
+<h1>Примеры использования Erlang Logger</h1>
+<p><i>9 февраля 2020</i></p>
+
+<h2 id="вступление">Вступление</h2>
+<p>Ведение логов в высоко нагруженных проектах — задача не тривиальная. И требует не простых инструментов. Долгие годы для эрланг проектов стандартом де-факто была библиотека <a href="https://github.com/erlang-lager/lager">lager</a>. Но с версии OPT-21 у эрланг появилось штатное средство из коробки -- модуль <a href="https://erlang.org/doc/man/logger.html">logger</a>.</p>
+<p><em>(Вернее, стандартное средство было и раньше — модуль <a href="https://erlang.org/doc/man/error_logger.html">error_logger</a>. Но он не удобен в использовании и не подходит для больших нагрузок, так что им никто не пользовался).</em></p>
+<p>Logger, конечно, не новость — он появился в 2018 году. Про него написано не мало, и документация имеется хорошая. Однако эту документацию нужно прочитать, чтобы правильно им пользоваться.</p>
+<p>Кроме основных сценариев использования — выводить логи на консоль, и ротировать в файлах — бывают нетривиальные случаи. Про такие случаи в моих проектах я и хочу рассказать.</p>
+<h2 id="как-устроен-logger">Как устроен logger</h2>
+<p>Но сначала, для полноты картины, я все-таки расскажу в двух словах как устроен logger.</p>
+
+<p><img src="../img/erlang_logger.jpg" width="800" alt="Erlang Logger schema"/></p>
+
+<p>Начинается все с того, что создается LogEvent. Это объект, который содержит:</p>
+<ul>
+<li>log level (debug, info, warning, error — 8 штук согласно протоколу syslog);</li>
+<li>message;</li>
+<li>metadata (pid, time, mfa, file, line и др).</li>
+</ul>
+<p>Message может быть:</p>
+<ul>
+<li>просто строка;</li>
+<li>строка для форматирования и аргументы;</li>
+<li>report (map или proplist).</li>
+</ul>
+<p>LogEvent передается в Logger API, представленное либо функцией <a href="https://erlang.org/doc/man/logger.html#log-2">logger:log</a> либо макросами и функциями, которые её оборачивают (?LOG_INFO, ?LOG_ERROR, logger:info, logger:error).</p>
+<p>Макросы добавляют метаданные (без них это пришлось бы делать вручную), а также проверяют log level, и не вызывают функцию log, если level ниже указанного в конфигурации. Это веская причина, чтобы пользоваться именно макросами, а не функциями.</p>
+<p>Logger применяет глобальные фильтры, затем передает LogEvent каждому хендлеру. Хендлеры применяют свои фильтры, форматируют сообщение, и что-то с ним делают.</p>
+<p>Большая часть работы выполняется в потоке клиента — процесса, который сгенерировал LogEvent. В потоках хендлеров выполняется меньшая часть работы для событий, которые смогли пройти через все фильтры. (Чем это хорошо, см в посте Фреда Хеберта, ссылку на который я даю ниже).</p>
+<p>Форматирование LogEvent в строку выполняется отложено, опять только для событий, прошедших через фильтры.</p>
+<h2 id="где-почитать-подробности">Где почитать подробности</h2>
+<p>Начать следует отсюда: <a href="https://erlang.org/doc/apps/kernel/logger_chapter.html">Logging</a>. Здесь описана архитектура логера, из каких компонентов он состоит, и как это все взаимодействует. Стоит обратить отдельное внимание на раздел 2.11 Protecting the Handler from Overload.</p>
+<p>Затем стоит просмотреть <a href="https://erlang.org/doc/apps/kernel/logger_cookbook.html">Logging Cookbook</a>. Здесь даны примеры конфигурации для разных случаев.</p>
+<p>Потом я весьма рекомендую почитать <a href="https://twitter.com/mononcqc/">Фреда Хеберта</a>, его пост <a href="https://ferd.ca/erlang-otp-21-s-new-logger.html">Erlang/OTP 21's new logger</a>. Пост весьма длинный, как это обычно бывает у Фреда. Там есть рассуждения, чем хороша архитектура logger. Но, главное, там есть весьма толковые рекомендации, как вообще правильно подходить к логированию. Чтобы потом, когда дела на проде пойдут как-нибудь не так, не было мучительно больно разбираться с этим &quot;не так&quot; по логам, которые вы сами и нагенерировали.</p>
+<p>Цитата: &quot;You get better at logging once you've seen enough terrible and useless logs to know what to avoid.&quot;</p>
+<p>Наконец, документация по 5 модулям, из которых состоит logger:</p>
+<ul>
+<li><a href="https://erlang.org/doc/man/logger.html">logger</a></li>
+<li><a href="https://erlang.org/doc/man/logger_filters.html">logger_filters</a></li>
+<li><a href="https://erlang.org/doc/man/logger_formatter.html">logger_formatter</a></li>
+<li><a href="https://erlang.org/doc/man/logger_std_h.html">logger_std_h</a></li>
+<li><a href="https://erlang.org/doc/man/logger_disk_log_h.html">logger_disk_log_h</a></li>
+</ul>
+<p>Сюда нужно заглядывать в поисках каких-либо специфических деталей.</p>
+<h2 id="тривиальные-и-нетривиальные-использования-logger">Тривиальные и нетривиальные использования logger</h2>
+<p>Теперь, наконец, подходим к примерам из моей практики.</p>
+<h3 id="фильтрация-progress-reports">Фильтрация progress reports</h3>
+<p>На старте ноды генерируется много событий вида:</p>
+<pre><code>info 2020-02-05T17:20:24.045738+03:00 &lt;0.1884.0&gt; supervisor: {&lt;0.1884.0&gt;,ranch_listener_sup}, started:
+ [{pid,&lt;0.1885.0&gt;},{id,ranch_conns_sup},{mfargs,{ranch_conns_sup,start_link,[jd_metrics,ranch_tcp,cowb
+oy_clear]}},{restart_type,permanent},{shutdown,infinity},{child_type,supervisor}]
+info 2020-02-05T17:20:24.046339+03:00 &lt;0.1886.0&gt; supervisor: {&lt;0.1886.0&gt;,ranch_acceptors_sup}, started
+: [{pid,&lt;0.1887.0&gt;},{id,{acceptor,&lt;0.1886.0&gt;,1}},{mfargs,{ranch_acceptor,start_link,[#Port&lt;0.8&gt;,ranch_
+tcp,error_logger,&lt;0.1885.0&gt;]}},{restart_type,permanent},{shutdown,brutal_kill},{child_type,worker}]</code></pre>
+<p>Супервизоры бодро рапортуют о своем запуске и запуске воркеров. Если проект большой: десятки приложений, тысячи супервизоров, десятки тысяч воркеров, то можно получить много экранов таких логов в консоли.</p>
+<p>Ноду в консоли обычно запускают не для того, чтобы смотреть там на эти progress reports. В файле такие логи пусть себе будут, а в консоли они только мешают. Хорошо бы их убрать.</p>
+<p>Для этого есть стандартный фильтр <a href="https://erlang.org/doc/man/logger_filters.html#progress-2">logger_filters:progress/2</a>. Подключим его:</p>
+<pre><code class="erlang">[
+    {kernel,
+        [
+            {logger_level, info},
+            {logger,
+                [
+                    {handler, default, logger_std_h,
+                        #{
+                            level =&gt; info,
+                            filters =&gt; [
+                                {skip_progress_info, {fun logger_filters:progress/2, stop}}
+                            ]
+                        }},
+                    ...</code></pre>
+<p>И порядок, лишнего шума в консоли больше нет.</p>
+<p><em>(Признаюсь, я сначала писал свой кастомный фильтр для этого. Потому что не прочитал документацию, и не знал, что есть стандартный фильтр.)</em></p>
+<h3 id="фильтрация-сообщений-от-супервизоров-библиотеки-amqp_client">Фильтрация сообщений от супервизоров библиотеки amqp_client</h3>
+<p>Если вам повезло работать с RabbitMQ через библиотеку <a href="https://github.com/rabbitmq/rabbitmq-erlang-client">amqp_client</a>, то там тоже на старте ноды генерируются сообщения от супервизоров из этой библиотеки. Но они не являются progress report, и не отсекаются стандартным фильтром.</p>
+<pre><code>notice 2020-02-07T13:38:11.614619+03:00 &lt;0.3158.0&gt; supervisor: {&lt;0.3158.0&gt;,amqp_connection_sup}, started: 
+[{pid,&lt;0.3160.0&gt;},{name,connection},{mfargs,{amqp_gen_connection,start_link...
+notice 2020-02-07T13:38:11.619991+03:00 &lt;0.3151.0&gt; supervisor: {&lt;0.3151.0&gt;,amqp_connection_type_sup}, started: 
+[{pid,&lt;0.3183.0&gt;},{name,channel_sup_sup},{mfargs,{amqp_channel_sup_sup,start_link, ...</code></pre>
+<p>Хотелось бы эти сообщения тоже убрать из консоли. Тут придется написать кастомный фильтр:</p>
+<pre><code class="erlang">-module(my_log_filter).
+
+-export([amqp_sup_noise_filter/2]).
+
+amqp_sup_noise_filter(#{
+    msg := {report, #{report := [{supervisor, {_, amqp_connection_sup}} | _]}}
+}, _Args) -&gt;
+    stop;
+
+amqp_sup_noise_filter(#{
+    msg := {report, #{report := [{supervisor, {_, amqp_connection_type_sup}} | _]}}
+}, _Args) -&gt;
+    stop;
+
+amqp_sup_noise_filter(#{
+    msg := {report, #{report := [{supervisor, {_, amqp_channel_sup}} | _]}}
+}, _Args) -&gt;
+    stop;
+
+amqp_sup_noise_filter(LogEvent, _Args) -&gt;
+    LogEvent.</code></pre>
+<p>И добавить этот фильтр в настройки хендлера:</p>
+<pre><code class="erlang">{handler, default, logger_std_h,
+    #{
+        level =&gt; info,
+        filters =&gt; [
+            {skip_progress_info, {fun logger_filters:progress/2, stop}},
+            {amqp_sup_noise_filter, {fun my_log_filter:amqp_sup_noise_filter/2, no_args}}
+        ]
+    }},</code></pre>
+<p>Нужно смотреть структуру LogEvent и подобрать подходящий шаблон, чтобы его отфильтровать.</p>
+<h3 id="ротация-логов-стандартными-хендлерами-logger_std_h-и-logger_disk_log_h">Ротация логов стандартными хендлерами logger_std_h и logger_disk_log_h</h3>
+<p>Logger имеет в комплекте два стандартных хендлера. Они оба умеют ротировать файлы, но делают это по-разному.</p>
+<p><strong>logger_std_h</strong> имеет свою реализацию, а <strong>logger_disk_log_h</strong> использует систему <a href="https://erlang.org/doc/man/disk_log.html">disk_log</a>. Это старая система хранения термов в файлах, которая используется в некоторых стандартных приложениях: stdlib, kernel, inets, mnesia и др.</p>
+<p>Чтобы понять разницу в поведении этих хендлеров, проведём эксперимент. Запустим два воркера, каждый из которых с интервалом в 2 секунды будет делать запись в лог:</p>
+<pre><code class="erlang">-record(state, {
+    id :: integer(),
+    counter = 0 :: integer()
+}).
+...
+init(ID) -&gt;
+    ?LOG_NOTICE(#{?MODULE =&gt; init, id =&gt; ID}),
+    timer:send_interval(?action_timeout, do_action),
+    {ok, #state{id = ID}}.
+...
+handle_info(do_action, #state{id = ID, counter = I} = State) -&gt;
+    ?LOG_INFO(#{?MODULE =&gt; do_action, id =&gt; ID, counter =&gt; I}),
+    {noreply, State#state{counter = I + 1}};</code></pre>
+<p>И сконфигурируем одинаково оба хендлера:</p>
+<pre><code class="erlang">{handler, handler_1, logger_std_h,
+    #{
+        level =&gt; info,
+        config =&gt; #{
+            file =&gt; &quot;logs/rotation_std_h.log&quot;,
+            max_no_bytes =&gt; 2048,
+            max_no_files =&gt; 3
+        }
+    }},
+{handler, handler_2, logger_disk_log_h,
+    #{
+        level =&gt; info,
+        config =&gt; #{
+            file =&gt; &quot;logs/disk_log_h_wrap.log&quot;,
+            max_no_bytes =&gt; 2048,
+            max_no_files =&gt; 3
+        }
+    }},</code></pre>
+<p>В ротации участвуют 3 файла, для каждого файла действует лимит в 2Кб (20 - 30 строк лога).</p>
+<p>Запустим, и понаблюдаем, что происходит в файлах. Там сначала появляются логи старта ноды, а потом такие записи:</p>
+<pre><code>2020-02-05T12:45:06.122172+03:00 info: counter: 2, id: 1, pwl_worker: do_action
+2020-02-05T12:45:06.122172+03:00 info: counter: 2, id: 2, pwl_worker: do_action
+2020-02-05T12:45:08.122173+03:00 info: counter: 3, id: 2, pwl_worker: do_action
+2020-02-05T12:45:08.122147+03:00 info: counter: 3, id: 1, pwl_worker: do_action
+2020-02-05T12:45:10.123158+03:00 info: counter: 4, id: 1, pwl_worker: do_action
+2020-02-05T12:45:10.123158+03:00 info: counter: 4, id: 2, pwl_worker: do_action</code></pre>
+
+<h4>Хендлер logger_std_h работает так:</h4>
+<ul>
+<li>сначала создается файл <strong>rotation_std_h.log</strong> и заполняется логами до лимита;</li>
+<li>затем создается файл <strong>rotation_std_h.log.0</strong>, старые логи переносятся в него, новые логи пишутся в <strong>rotation_std_h.log</strong>;</li>
+<li>когда <strong>rotation_std_h.log.0</strong> достигает лимита, создается <strong>rotation_std_h.log.1</strong>, логи из <strong>log.0</strong> переносятся в <strong>log.1</strong>, из <strong>log</strong> в <strong>log.0</strong>, и в <strong>log</strong> пишутся свежие логи;</li>
+<li>всего получается 4 файла ротации, и после того, как все 4 файла достигают лимита, логи из последнего файла теряются.</li>
+</ul>
+
+<p>Содержимое файлов при росте количества логов:</p>
+
+<h5>1-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>rotation_std_h.log</td>
+<td>start - counter 7</td>
+</tr>
+</tbody>
+</table>
+
+<h5>2-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>rotation_std_h.log</td>
+<td>counter 8 - counter 11</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.0</td>
+<td>start - counter 7</td>
+</tr>
+</tbody>
+</table>
+
+<h5>3-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>rotation_std_h.log</td>
+<td>counter 21 - counter 25</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.0</td>
+<td>counter 8 - counter 20</td>
+</tr>
+<tr class="odd">
+<td>rotation_std_h.log.1</td>
+<td>start - counter 7</td>
+</tr>
+</tbody>
+</table>
+
+<h5>4-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>rotation_std_h.log</td>
+<td>counter 34 - counter 38</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.0</td>
+<td>counter 21 - counter 33</td>
+</tr>
+<tr class="odd">
+<td>rotation_std_h.log.1</td>
+<td>counter 8 - counter 20</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.2</td>
+<td>start - counter 7</td>
+</tr>
+</tbody>
+</table>
+
+<h5>5-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>rotation_std_h.log</td>
+<td>counter 47 - counter 51</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.0</td>
+<td>counter 34 - counter 46</td>
+</tr>
+<tr class="odd">
+<td>rotation_std_h.log.1</td>
+<td>counter 21 - counter 33</td>
+</tr>
+<tr class="even">
+<td>rotation_std_h.log.2</td>
+<td>counter 8 - counter 20</td>
+</tr>
+</tbody>
+</table>
+
+
+<h4>Хендлер logger_disk_log_h работает так:</h4>
+<ul>
+<li>сразу появляется файл <strong>disk_log_h_wrap.log.1</strong> и два небольших бинарных файла <strong>disk_log_h_wrap.log.idx</strong>, <strong>disk_log_h_wrap.log.siz</strong>. В log.1 накапливаются логи до лимита;</li>
+<li>затем появляется файл <strong>disk_log_h_wrap.log.2</strong>, и новые логи пишутся уже в него;</li>
+<li>затем появляется файл <strong>disk_log_h_wrap.log.3</strong>, и тоже наполняется до лимита;</li>
+<li>когда последний файл в ротации наполняется, запись опять идет в <strong>disk_log_h_wrap.log.1</strong>, и так по кругу.</li>
+</ul>
+
+<p>Содержимое файлов при росте количества логов:</p>
+
+<h5>1-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>disk_log_h_wrap.log.1</td>
+<td>start - counter 7</td>
+</tr>
+</tbody>
+</table>
+
+<h5>2-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>disk_log_h_wrap.log.1</td>
+<td>start - counter 7</td>
+</tr>
+<tr class="even">
+<td>disk_log_h_wrap.log.2</td>
+<td>counter 8 - counter 11</td>
+</tr>
+</tbody>
+</table>
+
+<h5>3-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>disk_log_h_wrap.log.1</td>
+<td>start - counter 7</td>
+</tr>
+<tr class="even">
+<td>disk_log_h_wrap.log.2</td>
+<td>counter 8 - counter 19</td>
+</tr>
+<tr class="odd">
+<td>disk_log_h_wrap.log.3</td>
+<td>counter 20 - counter 25</td>
+</tr>
+</tbody>
+</table>
+
+<h5>4-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>disk_log_h_wrap.log.1</td>
+<td>counter 33 - counter 39</td>
+</tr>
+<tr class="even">
+<td>disk_log_h_wrap.log.2</td>
+<td>counter 8 - counter 19</td>
+</tr>
+<tr class="odd">
+<td>disk_log_h_wrap.log.3</td>
+<td>counter 20 - counter 32</td>
+</tr>
+</tbody>
+</table>
+
+<h5>5-й этап</h5>
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<thead>
+<tr class="header">
+<th>файл</th>
+<th>контент</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>disk_log_h_wrap.log.1</td>
+<td>counter 33 - counter 44</td>
+</tr>
+<tr class="even">
+<td>disk_log_h_wrap.log.2</td>
+<td>counter 45 - counter 53</td>
+</tr>
+<tr class="odd">
+<td>disk_log_h_wrap.log.3</td>
+<td>counter 20 - counter 32</td>
+</tr>
+</tbody>
+</table>
+<br/>
+<p>Таким образом, logger_std_h обеспечивает более привычную ротацию. За ней можно следить, например, с помощью tail -f. И подключать тулы, типа Filebeat или Logstash.</p>
+<p>А logger_disk_log_h работает достаточно экзотично. Чтобы узнать, в каком именно файле находятся последние логи, нужно смотреть время изменения файла. tail -f использовать нельзя, и подключить Filebeat сложно.</p>
+<p><em>(Говорят, что disk_log вроде как работает быстрее, но я не проверял.)</em></p>
+<h3 id="ротация-определенного-вида-событий-в-отдельном-файле">Ротация определенного вида событий в отдельном файле</h3>
+<p>Допустим, есть некий отдельный вид логов, которые мы хотим складывать в отдельный файл, а не вместе с другими логами.</p>
+<p>В моем случае это информация о запросах в систему, которые обрабатывались медленнее обычного. Каждый такой запрос и связанный с ним контекст хочется куда-то сохранить для последующего разбора. Но не в общий лог, который ротируется слишком быстро.</p>
+<p>В этом случае можно пометить LogEvent, как относящийся к некоторому домену:</p>
+<pre><code class="erlang">?LOG_INFO(#{event =&gt; slow_request, request =&gt; Request, context =&gt; Context}, #{domain =&gt; [slow_request]})</code></pre>
+<p>И применить стандартный фильтр <a href="https://erlang.org/doc/man/logger_filters.html#domain-2">logger_filters:domain/2</a>:</p>
+<pre><code class="erlang">{handler, handler_1, logger_std_h,
+    #{
+        level =&gt; info,
+        config =&gt; #{ ... },
+        filters =&gt; [
+            {ignore_slow_request, {fun logger_filters:domain/2, {stop, equal, [slow_request]}}}
+        ]
+    }},
+{handler, handler_2, logger_std_h,
+    #{
+        level =&gt; info,
+        config =&gt; #{ ... },
+        filters =&gt; [
+            {ignore_all_but_slow_request, {fun logger_filters:domain/2, {stop, not_equal, [slow_request]}}}
+        ]
+    }}</code></pre>
+<p>Фильтр нужно указать для всех хендлеров. В одном случае, чтобы пропускать только нужный домен, в остальных случаях, чтобы пропускать все, кроме этого домена. Если хендлеров много (отдельные хендлеры для разного уровня логов: debug, info, warning, error etc), то такая система не очень удобна. Но лучшей мы не придумали.</p>
+<p>В принципе, если лог сам по себе не большой, то нет беды, если он попадет в общую ротацию. И тогда можно поставить фильтр только на один хендлер. Но в нашем случае лог большой, и писать его сразу в несколько файлов не хочется.</p>
+<h3 id="заключение">Заключение</h3>
+<p>Тема логирования большая и интересная. Тут много о чем можно написать:</p>
+<ul>
+<li>централизованное хранение логов с нескольких машин/сервисов (ELK стек);</li>
+<li>логирование в Elixir;</li>
+<li>цветной вывод на консоль (error красный, warning желтый и т.д.).</li>
+</ul>
+<p>Возможно, будет продолжение :)</p>
+
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+    <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>

@@ -10,10 +10,16 @@ h3, h4 {
     margin-top:2em;
 }
 
+h5, h6 {
+    font-weight:bold;
+    padding:0.2em;
+    margin-top:2em;
+}
+
 h1 { font-size:200%; }
 h2 { font-size:150%; }
 h3 { font-size:130%; }
-h4 { font-size:100%; }
+h4, h5, h6 { font-size:100%; }
 
 hr { border-top:1px solid #999; }
 
