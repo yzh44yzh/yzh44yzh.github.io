@@ -1,0 +1,630 @@
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Эффективность кода: в теории и на практике</title>
+  <link rel="stylesheet" type="text/css" href="../css/bootstrap.min.css" />
+  <link rel="stylesheet" type="text/css" href="../css/main.css" />
+  <link rel="stylesheet" href="../css/hl_styles/default.css">
+  <script src="../js/highlight.pack.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+</head>
+<body>
+
+<div id="header">
+  <div id="main_title">
+    <a href="../blog.html" style="color:#013;">Про Erlang и про всякое</a>
+  </div>
+  <div id="profile_link">
+    <a href="https://www.facebook.com/yuri.zhloba" style="color:#013;">Юра Жлоба</a>
+  </div>
+</div>
+
+<div id="content">
+
+  <h1>Эффективность кода: в теории и на практике</h1>
+  <p><i>19 апреля 2020</i></p>
+
+  <p>На днях я вспомнил, что у меня есть аккаунт на HackerRank, и решил вспомнить старое, порешать там задачки.</p>
+
+  <p>Для разминки решил взять не сложную: <a href="https://www.hackerrank.com/challenges/simple-text-editor/problem">Simple Text Editor</a></p>
+
+  <p>Описание задачи смотрите по ссылке, не буду его тут дублировать. Но суть в том, что нужно хранить некий стейт, выполнять к нему запросы на чтение и на модификацию. Дело не сложное, думал, что быстро управлюсь.</p>
+
+
+  <h2>Решение №1</h2>
+
+  <p>Начнем с простого решения, не задумываясь об эффективности. В первую очередь нужно сосредоточиться на самой задаче. А уж потом думать об оптимизациях, если это понадобится. Для задач на HackerRank, как правило, это таки понадобится. А в реальной жизни может быть и нет.</p>
+
+  <p>Итак, поскольку у нас есть операция undo, то очевидный подход -- хранить историю всех модификаций, и уметь применять и откатывать каждую модификацию.</p>
+
+  <p>У нас есть две модифицирующих операции:</p>
+  <pre><code class="elixir">
+  @type operation :: {:append, String.t} | {:delete, String.t}
+  </code></pre>
+
+  <p>Историю можно хранить простым списком:</p>
+  <pre><code class="elixir">
+  @type operation_history :: [operation]
+  </code></pre>
+
+  <p>И весь стейт, который нам нужен, это текущее состояние строки в редакторе, и история операций:</p>
+  <pre><code class="elixir">
+  @type t :: {operation_history, String.t}
+  </code></pre>
+
+  <p>Делаем АПИ в функциональном стиле из чистых функций. Их понадобится пять штук:</p>
+  <ul>
+    <li><b>new/0</b> -- создать новый редактор (стейт);</li>
+    <li><b>get/2</b> -- получить символ в указанной позиции;</li>
+    <li><b>append/2</b> -- добавить строку;</li>
+    <li><b>delete/2</b> -- удалить строку;</li>
+    <li><b>undo/1</b> -- отменить предыдущую операцию.</li>
+  </ul>
+
+  <p>Функция <b>new/0</b> просто создает пустой стейт:</p>
+  <pre><code class="elixir">
+  @spec new() :: t
+  def new() do
+    {[], ""}
+  end
+  </code></pre>
+
+  <p>Функция <b>get/2</b> достаточно тривиальна:</p>
+  <pre><code class="elixir">
+  @spec get(integer, t) :: String.t
+  def get(pos, {_, str}) do
+    String.at(str, pos - 1)
+  end
+  </code></pre>
+
+  <p>Функция <b>append/2</b> модифицирует строку и сохраняет в истории операцию append:</p>
+  <pre><code class="elixir">
+  @spec append(String.t, t) :: t
+  def append(new_str, {operations, str}) do
+    new_operation = {:append, new_str}
+    {[new_operation | operations], str <> new_str}
+  end
+  </code></pre>
+
+  <p>Функция <b>delete/2</b> аналогичная:</p>
+  <pre><code class="elixir">
+  @spec delete(integer, t) :: t
+  def delete(len, {operations, str}) do
+    {str, deleted_str} = delete_tail(str, len)
+    new_operation = {:delete, deleted_str}
+    {[new_operation | operations], str}
+  end
+  </code></pre>
+
+  <p>Вместе с операцией delete сохраняется удаленный кусок строки. Так будет проще потом отменить эту операцию.</p>
+
+  <p>Само удаление хвоста строки хоть и достаточно просто, но все-таки вынесено в отдельную функцию:</p>
+  <pre><code class="elixir">
+  @spec delete_tail(String.t, integer) :: {String.t, String.t}
+  defp delete_tail(str, tail_len) do
+    String.split_at(str, String.length(str) - tail_len)
+  end
+  </code></pre>
+
+  <p>Функция undo/1 немного сложнее и интереснее всех предыдущих функций:</p>
+  <pre><code class="elixir">
+  @spec undo(t) :: t
+  def undo({operations, str}) do
+    [operation | operations] = operations
+    case operation do
+      {:append, appended_str} ->
+        {str, _} = delete_tail(str, String.length(appended_str))
+        {operations, str}
+      {:delete, deleted_str} ->
+        str = str <> deleted_str
+        {operations, str}
+    end
+  end
+  </code></pre>
+
+  <p>Она берет из истории последнюю операцию и отменяет её действие.</p>
+
+  <p>В целом реализация достаточно простая и занимает немного строк кода:</p>
+  <pre><code class="elixir">
+defmodule SimpleTextEditor do
+  @moduledoc """
+  https://www.hackerrank.com/challenges/simple-text-editor/problem
+  """
+
+  @type operation :: {:append, String.t} | {:delete, String.t}
+  @type operation_history :: [operation]
+  @type t :: {operation_history, String.t}
+
+
+  @spec new() :: t
+  def new() do
+    {[], ""}
+  end
+
+
+  @spec get(integer, t) :: String.t
+  def get(pos, {_, str}) do
+    String.at(str, pos - 1)
+  end
+
+
+  @spec append(String.t, t) :: t
+  def append(new_str, {operations, str}) do
+    new_operation = {:append, new_str}
+    {[new_operation | operations], str <> new_str}
+  end
+
+
+  @spec delete(integer, t) :: t
+  def delete(len, {operations, str}) do
+    {str, deleted_str} = delete_tail(str, len)
+    new_operation = {:delete, deleted_str}
+    {[new_operation | operations], str}
+  end
+
+
+  @spec undo(t) :: t
+  def undo({operations, str}) do
+    [operation | operations] = operations
+    case operation do
+      {:append, appended_str} ->
+        {str, _} = delete_tail(str, String.length(appended_str))
+        {operations, str}
+      {:delete, deleted_str} ->
+        str = str <> deleted_str
+        {operations, str}
+    end
+  end
+
+  @spec delete_tail(String.t, integer) :: {String.t, String.t}
+  defp delete_tail(str, tail_len) do
+    String.split_at(str, String.length(str) - tail_len)
+  end
+
+end
+  </code></pre>
+
+  <p>Правда этого мало, нужно еще взаимодействие с HackerRank -- чтение запросов и вывод ответов:</p>
+  <pre><code class="elixir">
+defmodule Runner do
+  alias SimpleTextEditor, as: Editor
+
+
+  def run() do
+    num_operations = IO.gets("") |> String.trim |> int_arg
+    do_operation(Editor.new(), num_operations)
+  end
+
+
+  defp do_operation(editor, 0), do: :done
+  defp do_operation(editor, counter) do
+    case IO.gets("") |> String.split([" ", "\n"]) do
+      ["1", str | _] -> Editor.append(str, editor)
+      ["2", len | _] -> Editor.delete(int_arg(len), editor)
+      ["3", pos | _] ->
+        char = Editor.get(int_arg(pos), editor)
+        IO.puts(char)
+        editor
+      ["4" | _] -> Editor.undo(editor)
+    end
+    |> do_operation(counter - 1)
+  end
+
+  defp int_arg(str) do
+    Integer.parse(str) |> elem(0)
+  end
+
+end
+
+Runner.run
+  </code></pre>
+
+  <p>Тут тоже всё не сложно: читаем количество операций, потом в рекурсивной функции обрабатываем каждую операцию. Реализован только happy path, так как HackerRank дает корректные данные и не требует обработки ошибок.</p>
+
+  <p>Что ж, запускаем наше первое решение. 16 тестов, 10 прошли успешно, 6 не прошли по лимиту времени.</p>
+
+  <p>Ну это ожидаемый результат. Как видно, пришла пора задуматься об оптимизации.</p>
+
+
+  <h2>Решение №2</h2>
+
+  <p>Попробуем сделать две вещи. Во-первых, будем работать с головой строки, а не с хвостом. И для этого строку будем хранить в развернутом виде. Во-вторых, будем хранить в стейте длину строки, чтобы не вычислять ее, всякий раз, когда она нужна.</p>
+
+  <p>Откровенно говоря, эти две оптимизации справедливы только для <b>List</b>, а у нас <b>String</b>, то есть <b>binary</b>. Для binary, вроде бы, не должно быть принципиальной разницы, модифицируется голова или хвост. И длина, вроде бы, должна вычисляться за константное время. Или нет?</p>
+
+  <p>Ну вот сейчас и посмотрим.</p>
+
+  <p>Теперь каждая операция хранит не только строку, но и ее длину:</p>
+  <pre><code class="elixir">
+  @type operation :: {:append, integer, String.t} | {:delete, integer, String.t}
+  </code></pre>
+
+  <p>И длина текущей строки в редакторе тоже хранится в стейте:</p>
+  <pre><code class="elixir">
+  @type t :: {operation_history, integer, String.t}
+  </code></pre>
+
+  <p>Функции <b>new/0</b> и <b>get/2</b> принципиально не меняются.</p>
+
+  <p>Функция <b>append/2</b> разворачивает строку, добавляет ее в начало, и сохраняет в стейте длины строк:</p>
+  <pre><code class="elixir">
+  @spec append(String.t, t) :: t
+  def append(new_str, {operations, len, str}) do
+    new_len = byte_size(new_str)
+    new_str = String.reverse(new_str)
+    new_operation = {:append, new_len, new_str}
+    {[new_operation | operations], new_len + len, new_str <> str}
+  end
+  </code></pre>
+
+  <p>Функция <b>delete/2</b> удаляет начало строки, и тоже сохраняет длины строк:</p>
+  <pre><code class="elixir">
+  @spec delete(integer, t) :: t
+  def delete(del_len, {operations, len, str}) do
+    &lt;&lt;del_str::binary-size(del_len), str::binary&gt;&gt; = str
+    new_operation = {:delete, del_len, del_str}
+    {[new_operation | operations], len - del_len, str}
+  end
+  </code></pre>
+
+  <p>Для удаления я использовал pattern matching на binary вместо <b>String.split_at</b> в надежде, что это может быть эффективнее.</p>
+
+  <p>Ну и функция <b>undo</b> делает все то же, но с учетом новой структуры стейта:</p>
+  <pre><code class="elixir">
+  @spec undo(t) :: t
+  def undo({operations, len, str}) do
+    [operation | operations] = operations
+    case operation do
+      {:append, app_len, _app_str} ->
+        &lt;&lt;_::binary-size(app_len), str::binary&gt;&gt; = str
+        {operations, len - app_len, str}
+      {:delete, del_len, del_str} ->
+        {operations, del_len + len, del_str <> str}
+    end
+  end
+  </code></pre>
+
+  <p>Все в целом получилось так:</p>
+  <pre><code class="elixir">
+defmodule OptimizedTextEditor do
+  @moduledoc """
+  https://www.hackerrank.com/challenges/simple-text-editor/problem
+  """
+
+  @type operation :: {:append, integer, String.t} | {:delete, integer, String.t}
+  @type operation_history :: [operation]
+  @type t :: {operation_history, integer, String.t}
+
+
+  @spec new() :: t
+  def new() do
+    {[], 0, ""}
+  end
+
+
+  @spec get(integer, t) :: String.t
+  def get(pos, {_, len, str}) do
+    String.at(str, len - pos)
+  end
+
+
+  @spec append(String.t, t) :: t
+  def append(new_str, {operations, len, str}) do
+    new_len = byte_size(new_str)
+    new_str = String.reverse(new_str)
+    new_operation = {:append, new_len, new_str}
+    {[new_operation | operations], new_len + len, new_str <> str}
+  end
+
+
+  @spec delete(integer, t) :: t
+  def delete(del_len, {operations, len, str}) do
+    &lt;&lt;del_str::binary-size(del_len), str::binary&gt;&gt; = str
+    # {del_str, str} = String.split_at(str, del_len)
+    new_operation = {:delete, del_len, del_str}
+    {[new_operation | operations], len - del_len, str}
+  end
+
+
+  @spec undo(t) :: t
+  def undo({operations, len, str}) do
+    [operation | operations] = operations
+    case operation do
+      {:append, app_len, _app_str} ->
+        &lt;&lt;_::binary-size(app_len), str::binary&gt;&gt; = str
+        # {_, str} = String.split_at(str, app_len)
+        {operations, len - app_len, str}
+      {:delete, del_len, del_str} ->
+        {operations, del_len + len, del_str <> str}
+    end
+  end
+
+end
+  </code></pre>
+
+В Runner нужно только заменить реализацию Editor, остальное остается, как было:
+  <pre><code class="elixir">
+defmodule Runner do
+  alias OptimizedTextEditor, as: Editor
+  </code></pre>
+
+Запускаем. Результат тот же -- 10 тестов проходят успешно, 6 не проходят по лимиту времени.
+
+Гм, ну ясно. binary -- это не List. Для него эти оптимизации не помогают. Нужно придумать что-то другое.
+
+
+  <h2>Решение №3</h2>
+
+  <p>Хорошо, давайте зайдем с другого боку. Не будем хранить историю операций, а будем хранить историю изменений текущей строки. Это увеличит потребление памяти. Зато undo не потребует никаких действий.</p>
+
+  <p>И реализация очень простая. Нужно всего лишь хранить стек изменений сроки:</p>
+  <pre><code class="elixir">
+defmodule JustStackTextEditor do
+  @moduledoc """
+  https://www.hackerrank.com/challenges/simple-text-editor/problem
+  """
+
+  @type t :: [{integer, String.t}]
+
+
+  @spec new() :: t
+  def new(), do: []
+
+
+  def get(pos, [{len, str} | _]) do
+    String.at(str, len - pos)
+  end
+
+
+  @spec append(String.t, t) :: t
+  def append(new_str, []) do
+    new_len = byte_size(new_str)
+    new_str = String.reverse(new_str)
+    [{new_len, new_str}]
+  end
+
+
+  def append(new_str, [{len, str} | _] = stack) do
+    new_len = byte_size(new_str)
+    new_str = String.reverse(new_str)
+    [{new_len + len, new_str <> str} | stack]
+  end
+
+
+  @spec delete(integer, t) :: t
+  def delete(del_len, [{len, str} | _] = stack) do
+    &lt;&lt;_::binary-size(del_len), str::binary&gt;&gt; = str
+    [{len - del_len, str} | stack]
+  end
+
+
+  @spec undo(t) :: t
+  def undo([_ | stack]), do: stack
+
+end
+  </code></pre>
+
+  <p>Видно, что от идеи хранить строку в перевернутом виде и её длину я не отказался. Иначе все было бы еще проще.</p>
+
+  <p>Подменяем реализацию:</p>
+  <pre><code class="elixir">
+defmodule Runner do
+  alias JustStackTextEditor, as: Editor
+  </code></pre>
+
+  <p>Запускаем. 11 тестов проходят успешно, 5 не проходят по лимиту времени. Опять не то. Как же так? Что делать?</p>
+
+
+<h2>Решение №3 с модификацией</h2>
+
+  <p>А черт его знает, что делать. Может, там <b>String.at</b> тормозит? Кто их знает, этих эликсирщиков, как у них там String.at реализован? Вдруг сделали O(n). А у нас тут binary, и это за константное время можно извлечь.</p>
+
+  <p>Попробуем pattern matching:</p>
+  <pre><code class="elixir">
+  @spec get(integer, t) :: String.t
+  def get(pos, [{len, str} | _]) when pos == len do
+    &lt;&lt;char::binary-size(1), _::binary&gt;&gt; = str
+    char
+  end
+
+  def get(1, [{len, str} | _]) do
+    pos = len - 1
+    &lt;&lt;_::binary-size(pos), char::binary-size(1)&gt;&gt; = str
+    char
+  end
+
+  def get(pos, [{len, str} | _]) do
+    pos = len - pos
+    &lt;&lt;_::binary-size(pos), char::binary-size(1), _::binary&gt;&gt; = str
+    char
+  end
+  </code></pre>
+
+  <p>Тут уж наша простая функция <b>get/1</b> стала не такой простой. Но, наверняка, усилия того стоили. Сейчас должно быть быстрее.</p>
+
+  <p>Запускаем. То же самое -- 5 тестов не проходят по лимиту времени.</p>
+
+  <p>Ну ладно, ясно, что String.at реализован нормально, за константное время. Эликсирщики не дураки, это я дурак.</p>
+
+
+  <h2>Бенчмарки</h2>
+
+  <p>Что ж, пора прекращать действовать наугад и подойти, наконец, к задаче как инженер. Нужно профилировать код и искать узкое место целенаправленно.</p>
+
+  <p>К счастью, HackerRank позволяет скачать свои тестовые данные. Что я и делаю. А дальше нужно написать бенчмарк, который прогонит мою реализацию на этих данных.</p>
+
+  <p>Бенчмарк берет произвольную функцию, вызывает ее 10 раз (по-хорошему стоило бы на порядок больше, но тогда придется долго ждать результатов), и показывает среднее время выполнения функции:</p>
+  <pre><code class="elixir">
+  defp profile_fun(f, label) do
+    num_runs = 10
+    times = Enum.map(1..num_runs,
+         fn count ->
+           {time, _res} = :timer.tc(f)
+           {count, time}
+         end)
+    total_time = Enum.reduce(times, 0, fn {_, t}, acc -> t + acc  end)
+    avg_time = total_time / num_runs
+    IO.puts("profile #{label}, avg time #{avg_time} times: #{inspect(times)}")
+  end
+  </code></pre>
+
+  <p>Теперь мы загрузим тестовые данные, обернем работу с редактором в анонимную функцию, и передадим эту функцию в бенчмарк:</p>
+  <pre><code class="elixir">
+  def profile() do
+    file = "./hr/simple-text-editor-input-7.txt"
+    {:ok, content} = File.read(file)
+    [first_line | lines] = String.split(content, "\n", trim: true)
+    profile_fun(
+      fn ->
+        Enum.reduce(lines, {Editor.new, ""}, &profile_operation/2)
+      end,
+      "SimpleTextEditor")
+  end
+
+  defp profile_operation(operation, editor) do
+    case String.split(operation, [" "]) do
+      ["1", str] ->
+        Editor.append(str, editor)
+      ["2", len] ->
+        Editor.delete(int_arg(len), editor)
+      ["3", pos] ->
+        char = Editor.get(int_arg(pos), editor)
+        IO.puts(char)
+        editor
+      ["4"] ->
+        Editor.undo(editor)
+    end
+  end
+  </code></pre>
+
+  <p>Теперь сравним наши три реализации:</p>
+  <pre><code>
+profile SimpleTextEditor, avg time 3,842,529.4 times: [{1, 3560961}, {2, 3443607}, ...
+profile OptimizedTextEditor, avg time 3,326,230.4 times: [{1, 3097741}, {2, 3125766}, ...
+profile JustStackTextEditor, avg time 3,949,343.8 times: [{1, 3199777}, {2, 3625935}, ...
+  </code></pre>
+
+  <p>Интересно, что все три дают примерно одинаковое время. Это значит, что все наши теоретические рассуждения об эффективности кода ничего не стоят. А еще, это наводит на мысль, что дело не в реализации Editor, а в реализации Runner.</p>
+
+  <p>Что ж такого может быть в Runner?</p>
+
+  <p>Внезапная догадка, а что если здесь:</p>
+  <pre><code class="elixir">
+        char = Editor.get(int_arg(pos), editor)
+        IO.puts(char)
+        editor
+  </code></pre>
+  <p>закомментировать <b>IO.puts</b>?</p>
+
+  <p>Комментируем, прогоняем бенчмарк, и:</p>
+  <pre><code>
+profile JustStackTextEditor, avg time 1416788.3 times: [{1, 1046831}, {2, 1361710}, ...
+  </code></pre>
+  <p>Ускорение больше чем в 2 раза!</p>
+
+  <p>Ага! Вот уж эти эликсирщики. Напихали всяких string interpolation в свой IO.puts, и он тормозит. Уж, конечно, с правильными эрланговскими функциями такого не случится.</p>
+
+  <p>Заменяю <b>IO.puts</b> на <b>:io.format</b>. Гм, результат тот же.</p>
+
+  <p>Заменяю <b>:io.format</b> на <b>:io.put_chars</b>. Результат тот же.</p>
+
+  <p>Похоже я второй раз облажался обвиняя эликсирщиков в некомпетентности :)</p>
+
+
+  <h2>Правильное решение</h2>
+
+  <p>А давайте попробуем буферизированный вывод. Вместо того, чтобы вызывать IO.puts 100500 раз с одним символом, давайте попробуем накопить все эти символы, и вызвать IO.puts один раз в конце.</p>
+
+  <p>Немного усложняется код, так как мы передаем в рекурсии не только стейт редактора, но и буфер для накопления вывода:</p>
+  <pre><code class="elixir">
+  def profile() do
+    file = "./hr/simple-text-editor-input-7.txt"
+    {:ok, content} = File.read(file)
+    [first_line | lines] = String.split(content, "\n", trim: true)
+    profile_fun(
+      fn ->
+        {_editor, output} = Enum.reduce(lines, {Editor.new, ""}, &profile_operation/2)
+        IO.puts(output)
+      end,
+      "SimpleTextEditor")
+  end
+
+  defp profile_operation(operation, {editor, output}) do
+    case String.split(operation, [" "]) do
+      ["1", str] ->
+        {Editor.append(str, editor), output}
+      ["2", len] ->
+        {Editor.delete(int_arg(len), editor), output}
+      ["3", pos] ->
+        char = Editor.get(int_arg(pos), editor)
+        {editor, output <> char <> "\n"}
+      ["4"] ->
+        {Editor.undo(editor), output}
+    end
+  end
+  </code></pre>
+
+  <p>Результат:</p>
+  <pre><code>
+profile SimpleTextEditor, avg time 1,397,909.9 times: [{1, 1305942}, {2, 1338951}, ...
+profile OptimizedTextEditor, avg time 925,032.5 times: [{1, 977133}, {2, 843107}, ...
+profile JustStackTextEditor, avg time 1,599,463.3 times: [{1, 1220573}, {2, 1368548}, ...
+  </code></pre>
+
+  <p>Совсем другое дело. И, кстати, оказывается, что OptimizedTextEditor все-таки работает быстрее. Раньше это маскировалось тормозами в IO, а сейчас стало явно.</p>
+
+  <p>Вносим такую же доработку в Runner:</p>
+  <pre><code class="elixir">
+  def run() do
+    num_operations = IO.gets("") |> String.trim |> int_arg
+    {_editor, output} = do_operation({Editor.new(), ""}, num_operations)
+    IO.puts(output)
+  end
+
+  defp do_operation({editor, output}, 0), do: {editor, output}
+  defp do_operation({editor, output}, counter) do
+    case IO.gets("") |> String.split([" ", "\n"]) do
+      ["1", str | _] ->
+        {Editor.append(str, editor), output}
+      ["2", len | _] ->
+        {Editor.delete(int_arg(len), editor), output}
+      ["3", pos | _] ->
+        char = Editor.get(int_arg(pos), editor)
+        {editor, output <> char <> "\n"}
+      ["4" | _] ->
+        {Editor.undo(editor), output}
+    end
+    |> do_operation(counter - 1)
+  end
+  </code></pre>
+
+  <p>И HackerRank, наконец, принимает решение. 16 из 16 тестов проходят успешно.</p>
+
+  <p>Заодно проверяем, есть ли разница между:
+    <i>String.at(str, len - pos)</i> и
+    <i>&lt;&lt;_::binary-size(pos), char::binary-size(1), _::binary&gt;&gt; = str</i>
+    Нет разницы. Вероятно, String.at именно так и реализован.</p>
+
+
+  <h2>Итого</h2>
+
+  <p>Теоретические рассуждения о производительности оказались частично верны, но это не помогло найти узкое место. Помог запуск бенчмарков на подходящих данных.</p>
+
+  <p>Оптимизация производительности на основе теоретических рассуждений, без бенчмарков и перф-тестов -- это ерунда. (При этом сделать правильные бенчмарки и перф-тесты само по себе может быть нетривиальным. Но это тема для отдельного разговора.)</p>
+
+  <div id="disqus_thread"></div>
+  <script type="text/javascript">
+var disqus_shortname = 'yzh44yzh';
+
+(function() {
+var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+(document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();
+</script>
+  <noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+  <a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+
+</div>
+</body>
+</html>
