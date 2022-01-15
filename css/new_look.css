@@ -1,0 +1,31 @@
+body {
+    background-color: #fff;
+    margin: 4em;
+    margin-top: 2em;
+}
+
+p {
+    font-size: medium;
+}
+
+.header {
+    margin-bottom: 2em;
+}
+
+.footer {
+    margin-top: 2em;
+    margin-bottom: 2em;
+    padding-left: 1em;
+}
+
+.ui.segments {
+    margin-top: 2em;
+}
+
+.item {
+    font-size: medium;
+}
+
+.big-letter {
+    color: #ff781e;
+}
