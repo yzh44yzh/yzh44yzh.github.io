@@ -2,28 +2,29 @@ body {
     background-color: #fff;
     margin: 4em;
     margin-top: 2em;
+    font-size: x-large;
 }
 
-p {
-    font-size: medium;
+td {
+    padding: 1em;
 }
 
 .header {
     margin-bottom: 2em;
 }
 
+.navigation {
+    background-color: #ff781e;
+}
+
+.content {
+    margin-bottom: 3em;
+}
+
 .footer {
     margin-top: 2em;
     margin-bottom: 2em;
     padding-left: 1em;
-}
-
-.ui.segments {
-    margin-top: 2em;
-}
-
-.item {
-    font-size: medium;
 }
 
 .big-letter {
