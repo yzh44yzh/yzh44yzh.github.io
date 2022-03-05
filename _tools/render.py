@@ -12,24 +12,40 @@ def render_all():
     
     pages = [
         ('index', 'Главная'),
-        ('courses', 'Учебные курсы')
+        ('courses', 'Учебные курсы'),
+        ('blog', 'Блог'),
+        ('prog_cats', 'Коты-программисты'),
+        ('music', 'Музыка'),
     ]
     for page in pages:
-        render_page(page, base_tpl)
+        data = {
+            'navigation': build_navigation(pages, page)
+        }
+        render_page(page, base_tpl, data)
 
 
-def render_page(page, base_tpl):
+def build_navigation(pages, current_page):
+    res = ''
+    for page in pages:
+        if page == current_page:
+            (_, page_name) = page
+            res += f'<td>{page_name}</td>\n'
+        else:
+            (page_id, page_name) = page
+            res += f'<td><a href="/{page_id}.html">{page_name}</a></td>\n'
+    return res
+
+
+def render_page(page, base_tpl, data):
     print(f'Render {page}')
-    (page, page_name) = page
-    page_tpl_file = open(f'_templates/{page}.tpl.html')
+    (page_id, page_name) = page
+    page_tpl_file = open(f'_templates/{page_id}.tpl.html')
     content = page_tpl_file.read()
     page_tpl_file.close()
-    data = {
-        'page_name': page_name,
-        'content': content
-    }
+    data['page_name'] = page_name
+    data['content'] = content
     content = chevron.render(base_tpl, data)
-    page_file = open(f'{page}.html', 'w')
+    page_file = open(f'{page_id}.html', 'w')
     page_file.write(content)
     page_file.close()
 
